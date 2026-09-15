@@ -294,6 +294,11 @@
             'royal': { color: 'border-faction-royal', bg: 'bg-yellow-800/80', name: 'ราชวงศ์ (Royal)' }
         };
 
+        const cloneJoker = (j) => ({
+            ...j,
+            state: j.state ? { ...j.state } : undefined
+        });
+
         const JOKERS_DB = [
             // Wildling
             { id: 'w1', name: 'หมาป่าพงไพร', faction: 'wildling', rarity: 1, cost: 3, icon: '🐺', 
@@ -304,8 +309,9 @@
               eff: (ctx) => { ctx.playedCards.forEach(c => { if(c.val >= 2 && c.val <= 6) ctx.addChips += 15; }); } },
             { id: 'w3', name: 'หมอผีป่า', faction: 'wildling', rarity: 2, cost: 5, icon: '💀', 
               desc: 'ทิ้งไพ่ 1 ครั้ง ได้ +5 Chips ถาวร (เฉพาะด่านนี้)', state: { b: 0 },
-              onDiscard: (j) => j.state.b += 5, onEnd: (j) => j.state.b = 0,
-              eff: (ctx, j) => { ctx.addChips += (j.state.b || 0); } },
+              onDiscard: (j) => { if(!j.state) j.state={b:0}; j.state.b += 5; },
+              onEnd: (j) => { if(!j.state) j.state={b:0}; j.state.b = 0; },
+              eff: (ctx, j) => { ctx.addChips += (j.state?.b || 0); } },
             { id: 'w4', name: 'นักธนูเงา', faction: 'wildling', rarity: 1, cost: 4, icon: '🏹', 
               desc: 'ไพ่ดาบ ⚔️ ที่เล่น ให้ +20 Chips ต่อใบ',
               eff: (ctx) => { ctx.playedCards.forEach(c => { if(c.suit === 'S') ctx.addChips += 20; }); } },
@@ -348,7 +354,8 @@
             // Royal
             { id: 'r1', name: 'มงกุฎราชา', faction: 'royal', rarity: 4, cost: 10, icon: '👑', 
               desc: '+1 Mult ถาวรเมื่อผ่านแต่ละด่าน', state: { b: 0 },
-              onWin: (j) => j.state.b += 1, eff: (ctx, j) => { ctx.addMult += (j.state.b || 0); } },
+              onWin: (j) => { if(!j.state) j.state={b:0}; j.state.b += 1; },
+              eff: (ctx, j) => { ctx.addMult += (j.state?.b || 0); } },
             { id: 'r2', name: 'คทาแห่งกฎ', faction: 'royal', rarity: 4, cost: 9, icon: '🪄', 
               desc: 'เล่น Flush ได้ +80 Chips และ +12 Mult',
               eff: (ctx) => { if(ctx.handName.includes('Flush')) { ctx.addChips += 80; ctx.addMult += 12; } } },
@@ -611,7 +618,7 @@
                     let r = Math.random(), maxR = 2;
                     if(r>0.8) maxR=3; if(r>0.95) maxR=5;
                     let cands = pool.filter(j => j.rarity <= maxR && !State.jokers.some(o=>o.id===j.id) && !State.shopItems.some(s=>s.id===j.id));
-                    if(cands.length > 0) State.shopItems.push(JSON.parse(JSON.stringify(cands[Math.floor(Math.random()*cands.length)])));
+                    if(cands.length > 0) State.shopItems.push(cloneJoker(cands[Math.floor(Math.random()*cands.length)]));
                     else break;
                 }
             },
