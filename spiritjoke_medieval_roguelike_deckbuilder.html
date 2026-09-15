@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SpiritJoke: The Medieval Deckbuilder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Mitr:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        medieval: ['"Cinzel Decorative"', 'serif'],
+                        body: ['"Mitr"', 'sans-serif'],
+                    },
+                    colors: {
+                        parchment: '#f1e4c3',
+                        'parchment-dark': '#d4c49d',
+                        stone: { 850: '#23201d', 950: '#141210' },
+                        gold: { 400: '#ffd700', 600: '#b8860b', 800: '#8b6508' },
+                        faction: { wild: '#4d7c0f', holy: '#fef3c7', shadow: '#57534e', royal: '#fbbf24' }
+                    },
+                    boxShadow: {
+                        'glow-gold': '0 0 15px 2px rgba(255, 215, 0, 0.5)',
+                        'glow-red': '0 0 15px 2px rgba(220, 38, 38, 0.6)',
+                        'card': '3px 3px 10px rgba(0,0,0,0.7)',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body {
+            background-color: #141210;
+            background-image: radial-gradient(circle at center, #2a2420 0%, #141210 100%);
+            color: #f1e4c3;
+            overflow: hidden;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .text-shadow { text-shadow: 2px 2px 4px rgba(0,0,0,0.9); }
+        .text-shadow-gold { text-shadow: 0px 0px 8px rgba(255, 215, 0, 0.6); }
+        .text-shadow-red { text-shadow: 0px 0px 8px rgba(239, 68, 68, 0.8), 2px 2px 4px rgba(0,0,0,1); }
+        
+        .card-container { perspective: 1000px; }
+        
+        .card {
+            background: linear-gradient(135deg, #f1e4c3, #d4c49d);
+            color: #23201d;
+            border: 2px solid #8b6508;
+            border-radius: 0.5rem;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s;
+        }
+        
+        .card:hover:not(.disabled) { transform: translateY(-8px); box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        .card.selected { transform: translateY(-15px) scale(1.05); box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.6); border-color: #ffd700; z-index: 10; }
+        .card.disabled { filter: grayscale(100%) brightness(0.6); pointer-events: none; }
+
+        .joker-card {
+            background: linear-gradient(to bottom right, #2a2420, #141210);
+            border: 2px solid;
+            transition: transform 0.2s;
+        }
+        .joker-card:hover { transform: translateY(-5px) scale(1.1); z-index: 10; }
+
+        /* Suits */
+        .suit-S { color: #374151; } /* Swords */
+        .suit-H { color: #b91c1c; } /* Grails */
+        .suit-C { color: #15803d; } /* Maces */
+        .suit-D { color: #d97706; } /* Crowns */
+
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-12px); }
+            100% { transform: translateY(0px); }
+        }
+        .animate-float { animation: float 4s ease-in-out infinite; }
+
+        /* Fix for absolute centering popup animation */
+        @keyframes popupAnim {
+            0% { opacity: 0; transform: translate(-50%, 0) scale(0.5); }
+            30% { opacity: 1; transform: translate(-50%, -30px) scale(1.2); }
+            80% { opacity: 1; transform: translate(-50%, -40px) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -60px) scale(0.9); }
+        }
+        .damage-popup {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            pointer-events: none;
+            animation: popupAnim 1.5s ease-out forwards;
+            font-weight: bold;
+            z-index: 60;
+            white-space: nowrap;
+        }
+
+        @keyframes screenShake {
+            0% { transform: translate(2px, 1px) rotate(0deg); }
+            10% { transform: translate(-1px, -2px) rotate(-1deg); }
+            20% { transform: translate(-3px, 0px) rotate(1deg); }
+            30% { transform: translate(0px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(1deg); }
+            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(2px, 1px) rotate(-1deg); }
+            80% { transform: translate(-1px, -1px) rotate(1deg); }
+            90% { transform: translate(2px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+        .shake { animation: screenShake 0.4s; }
+
+        .tooltip .tooltip-text {
+            visibility: hidden; opacity: 0; transition: opacity 0.2s;
+            bottom: 120%; left: 50%; transform: translateX(-50%);
+        }
+        .tooltip:hover .tooltip-text { visibility: visible; opacity: 1; }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #141210; }
+        ::-webkit-scrollbar-thumb { background: #8b6508; border-radius: 4px; }
+        
+        #toast-container { pointer-events: none; }
+    </style>
+</head>
+<body class="font-body text-parchment h-screen w-screen flex flex-col relative" id="body">
+
+    <div id="app" class="w-full h-full flex flex-col relative z-10"></div>
+    <div id="toast-container" class="absolute top-[10%] left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center gap-2"></div>
+    <!-- Dedicated container for absolute centered popups -->
+    <div id="damage-container" class="absolute inset-0 pointer-events-none z-40 overflow-hidden"></div>
+    <div id="bg-overlay" class="absolute inset-0 bg-black/50 z-0 pointer-events-none transition-colors duration-1000"></div>
+    
+    <!-- Audio Toggle -->
+    <button id="btn-audio" onclick="SoundManager.toggleMute()" class="absolute top-4 right-4 z-50 w-10 h-10 bg-stone-900 border border-gold-600 rounded-full flex items-center justify-center text-xl shadow-card hover:bg-stone-800 transition-colors">
+        🔊
+    </button>
+
+    <script>
+        const Utils = {
+            formatNum: (num) => {
+                if (num === undefined || isNaN(num)) return "0";
+                if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
+                if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+                return num.toLocaleString();
+            },
+            sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+            shuffle: (array) => {
+                let curr = array.length, rand;
+                while (curr != 0) {
+                    rand = Math.floor(Math.random() * curr); curr--;
+                    [array[curr], array[rand]] = [array[rand], array[curr]];
+                }
+                return array;
+            },
+            showToast: (msg, type = 'error') => {
+                const container = document.getElementById('toast-container');
+                const toast = document.createElement('div');
+                const color = type === 'error' ? 'bg-red-900/95 text-red-200 border-red-500' : 'bg-green-900/95 text-green-200 border-green-500';
+                toast.className = `px-6 py-2 rounded border shadow-lg transform transition-all duration-300 translate-y-4 opacity-0 ${color} font-medieval font-bold text-lg pointer-events-none`;
+                toast.innerText = msg;
+                container.appendChild(toast);
+                requestAnimationFrame(() => toast.classList.remove('translate-y-4', 'opacity-0'));
+                setTimeout(() => {
+                    toast.classList.add('-translate-y-4', 'opacity-0');
+                    setTimeout(() => toast.remove(), 300);
+                }, 2000);
+            }
+        };
+
+        const SoundManager = {
+            ctx: null, muted: false, initialized: false,
+            init: function() {
+                if (this.initialized) return;
+                try {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                    this.initialized = true;
+                    // Load preference
+                    const saved = localStorage.getItem('spiritjoke_muted');
+                    if(saved === 'true') { this.muted = true; this.updateUI(); }
+                } catch(e) { console.warn("AudioContext not supported", e); }
+            },
+            toggleMute: function() {
+                this.muted = !this.muted;
+                try { localStorage.setItem('spiritjoke_muted', this.muted); } catch(e){}
+                this.updateUI();
+                if(!this.muted) this.play('select');
+            },
+            updateUI: function() {
+                document.getElementById('btn-audio').innerText = this.muted ? '🔇' : '🔊';
+            },
+            play: function(type) {
+                if(this.muted || !this.ctx) return;
+                if(this.ctx.state === 'suspended') this.ctx.resume();
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.connect(gain); gain.connect(this.ctx.destination);
+                    const now = this.ctx.currentTime;
+                    
+                    if(type === 'select') {
+                        osc.type = 'sine'; osc.frequency.setValueAtTime(600, now);
+                        osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
+                        gain.gain.setValueAtTime(0.1, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                        osc.start(now); osc.stop(now + 0.1);
+                    } else if(type === 'play') {
+                        osc.type = 'triangle'; osc.frequency.setValueAtTime(300, now);
+                        osc.frequency.exponentialRampToValueAtTime(200, now + 0.2);
+                        gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                        osc.start(now); osc.stop(now + 0.2);
+                    } else if(type === 'hit') {
+                        osc.type = 'square'; osc.frequency.setValueAtTime(100, now);
+                        osc.frequency.exponentialRampToValueAtTime(50, now + 0.3);
+                        gain.gain.setValueAtTime(0.3, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                        osc.start(now); osc.stop(now + 0.3);
+                    } else if(type === 'joker') {
+                        osc.type = 'sine'; osc.frequency.setValueAtTime(800, now);
+                        osc.frequency.linearRampToValueAtTime(1200, now + 0.1);
+                        osc.frequency.linearRampToValueAtTime(800, now + 0.3);
+                        gain.gain.setValueAtTime(0, now); gain.gain.linearRampToValueAtTime(0.15, now + 0.1); gain.gain.linearRampToValueAtTime(0, now + 0.3);
+                        osc.start(now); osc.stop(now + 0.3);
+                    } else if(type === 'win') {
+                        osc.type = 'triangle';
+                        [400, 500, 600, 800].forEach((f, i) => {
+                            setTimeout(() => {
+                                if(this.muted) return;
+                                const o = this.ctx.createOscillator(); const g = this.ctx.createGain();
+                                o.type = 'triangle'; o.frequency.value = f;
+                                o.connect(g); g.connect(this.ctx.destination);
+                                const t = this.ctx.currentTime;
+                                g.gain.setValueAtTime(0.1, t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+                                o.start(t); o.stop(t + 0.2);
+                            }, i * 150);
+                        });
+                    } else if(type === 'coin') {
+                        osc.type = 'sine'; osc.frequency.setValueAtTime(1200, now);
+                        osc.frequency.exponentialRampToValueAtTime(2000, now + 0.1);
+                        gain.gain.setValueAtTime(0.1, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                        osc.start(now); osc.stop(now + 0.3);
+                    }
+                } catch(e) { console.warn("Sound play failed", e); }
+            }
+        };
+        // Bind sound init to first click
+        document.addEventListener('click', () => SoundManager.init(), {once:true});
+
+        const Storage = {
+            save: (data) => {
+                try { localStorage.setItem('spiritjoke_save', JSON.stringify(data)); } 
+                catch (e) { console.warn("Storage disabled."); }
+            },
+            load: () => {
+                try {
+                    const data = localStorage.getItem('spiritjoke_save');
+                    return data ? JSON.parse(data) : null;
+                } catch (e) { return null; }
+            }
+        };
+
+        const SUITS = {
+            'S': { name: 'ดาบ', symbol: '⚔️', css: 'suit-S' },
+            'H': { name: 'ถ้วยศักดิ์สิทธิ์', symbol: '🏆', css: 'suit-H' },
+            'C': { name: 'กระบอง', symbol: '⚒️', css: 'suit-C' },
+            'D': { name: 'มงกุฎ', symbol: '👑', css: 'suit-D' }
+        };
+        const RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+        
+        const HAND_TYPES = [
+            { name: "Royal Flush", chips: 150, mult: 12 },
+            { name: "Straight Flush", chips: 100, mult: 9 },
+            { name: "Four of a Kind", chips: 65, mult: 7 },
+            { name: "Full House", chips: 45, mult: 5 },
+            { name: "Flush", chips: 40, mult: 4 },
+            { name: "Straight", chips: 35, mult: 4 },
+            { name: "Three of a Kind", chips: 30, mult: 3 },
+            { name: "Two Pair", chips: 20, mult: 2 },
+            { name: "Pair", chips: 10, mult: 2 },
+            { name: "High Card", chips: 5, mult: 1 }
+        ];
+
+        const FACTIONS = {
+            'wildling': { color: 'border-faction-wild', bg: 'bg-green-950/80', name: 'คนป่า (Wildling)' },
+            'holy': { color: 'border-faction-holy', bg: 'bg-yellow-900/30', name: 'ศักดิ์สิทธิ์ (Holy)' },
+            'shadow': { color: 'border-faction-shadow', bg: 'bg-stone-900/90', name: 'เงา (Shadow)' },
+            'royal': { color: 'border-faction-royal', bg: 'bg-yellow-800/80', name: 'ราชวงศ์ (Royal)' }
+        };
+
+        const cloneJoker = (j) => ({
+            ...j,
+            state: j.state ? { ...j.state } : undefined
+        });
+
+        const JOKERS_DB = [
+            // Wildling
+            { id: 'w1', name: 'หมาป่าพงไพร', faction: 'wildling', rarity: 1, cost: 3, icon: '🐺', 
+              desc: 'มือไพ่คู่ (Pair) ได้โบนัส +30 Chips',
+              eff: (ctx) => { if(ctx.handName.includes('Pair') || ctx.handName==='Full House') ctx.addChips += 30; } },
+            { id: 'w2', name: 'หมีดำขุนเขา', faction: 'wildling', rarity: 1, cost: 4, icon: '🐻', 
+              desc: 'ไพ่เลข 2-6 ที่เล่น ให้ +15 Chips ต่อใบ',
+              eff: (ctx) => { ctx.playedCards.forEach(c => { if(c.val >= 2 && c.val <= 6) ctx.addChips += 15; }); } },
+            { id: 'w3', name: 'หมอผีป่า', faction: 'wildling', rarity: 2, cost: 5, icon: '💀', 
+              desc: 'ทิ้งไพ่ 1 ครั้ง ได้ +5 Chips ถาวร (เฉพาะด่านนี้)', state: { b: 0 },
+              onDiscard: (j) => { if(!j.state) j.state={b:0}; j.state.b += 5; },
+              onEnd: (j) => { if(!j.state) j.state={b:0}; j.state.b = 0; },
+              eff: (ctx, j) => { ctx.addChips += (j.state?.b || 0); } },
+            { id: 'w4', name: 'นักธนูเงา', faction: 'wildling', rarity: 1, cost: 4, icon: '🏹', 
+              desc: 'ไพ่ดาบ ⚔️ ที่เล่น ให้ +20 Chips ต่อใบ',
+              eff: (ctx) => { ctx.playedCards.forEach(c => { if(c.suit === 'S') ctx.addChips += 20; }); } },
+            { id: 'w5', name: 'หัวหน้าเผ่า', faction: 'wildling', rarity: 2, cost: 6, icon: '🪓', 
+              desc: 'หากเล่น Straight ได้ +150 Chips',
+              eff: (ctx) => { if(ctx.handName.includes('Straight')) ctx.addChips += 150; } },
+            
+            // Holy
+            { id: 'h1', name: 'บาทหลวง', faction: 'holy', rarity: 1, cost: 4, icon: '⛪', 
+              desc: 'ผ่านด่านรับโบนัส +3 เหรียญ', onWin: (j, st) => st.money += 3 },
+            { id: 'h2', name: 'อัศวินพิทักษ์', faction: 'holy', rarity: 2, cost: 5, icon: '🛡️', 
+              desc: 'เริ่มด่านได้โควต้า "ทิ้งไพ่" เพิ่ม +1', onStart: (j, st) => st.discardsLeft += 1 },
+            { id: 'h3', name: 'นักบุญ', faction: 'holy', rarity: 1, cost: 4, icon: '🕊️', 
+              desc: 'ไพ่หน้า (J,Q,K) ที่เล่น ให้ +1 Mult ต่อใบ',
+              eff: (ctx) => { ctx.playedCards.forEach(c => { if(c.val >= 10 && ['J','Q','K'].includes(c.rank)) ctx.addMult += 1; }); } },
+            { id: 'h4', name: 'ภิกษุณี', faction: 'holy', rarity: 3, cost: 7, icon: '📿', 
+              desc: 'ไม่ทิ้งไพ่เลยในด่าน ได้ Mult x2',
+              eff: (ctx, j, st) => { if(st.discardsLeft === st.maxDiscards + (st.jokers.some(x=>x.id==='h2')?1:0)) ctx.xMult *= 2; } },
+            { id: 'h5', name: 'ทูตสวรรค์', faction: 'holy', rarity: 2, cost: 5, icon: '👼', 
+              desc: 'ดอกเบี้ย: ทุก 5 เหรียญ ได้ +1 เหรียญตอนจบด่าน (สูงสุด +5)',
+              onEnd: (j, st) => st.money += Math.min(5, Math.floor(st.money / 5)) },
+
+            // Shadow
+            { id: 's1', name: 'โจรกลางคืน', faction: 'shadow', rarity: 1, cost: 4, icon: '🗡️', 
+              desc: '+10 Mult แต่ Chips ฐานหัก -15',
+              eff: (ctx) => { ctx.addMult += 10; ctx.addChips -= 15; } },
+            { id: 's2', name: 'นักฆ่าเงา', faction: 'shadow', rarity: 2, cost: 6, icon: '🥷', 
+              desc: 'หากไพ่ในมือเหลือน้อยกว่า 3 ใบ Mult x3',
+              eff: (ctx, j, st) => { if(st.hand.length <= 3) ctx.xMult *= 3; } },
+            { id: 's3', name: 'แม่มดคำสาป', faction: 'shadow', rarity: 3, cost: 7, icon: '🔮', 
+              desc: 'สุ่มเพิ่ม +1 ถึง +20 Mult ทุกครั้งที่เล่น',
+              eff: (ctx) => { ctx.addMult += Math.floor(Math.random() * 20) + 1; } },
+            { id: 's4', name: 'ปีศาจสัญญา', faction: 'shadow', rarity: 3, cost: 8, icon: '📜', 
+              desc: 'Mult x3 แต่เสีย -3 เหรียญทุกจบด่าน',
+              eff: (ctx) => { ctx.xMult *= 3; }, onEnd: (j, st) => { st.money = Math.max(0, st.money - 3); } },
+            { id: 's5', name: 'ผู้พลีชีพ', faction: 'shadow', rarity: 2, cost: 6, icon: '🩸', 
+              desc: 'หากเหลือสิทธิ์เล่นไพ่ 1 ครั้ง, Mult x4',
+              eff: (ctx, j, st) => { if(st.playsLeft === 1) ctx.xMult *= 4; } },
+
+            // Royal
+            { id: 'r1', name: 'มงกุฎราชา', faction: 'royal', rarity: 4, cost: 10, icon: '👑', 
+              desc: '+1 Mult ถาวรเมื่อผ่านแต่ละด่าน', state: { b: 0 },
+              onWin: (j) => { if(!j.state) j.state={b:0}; j.state.b += 1; },
+              eff: (ctx, j) => { ctx.addMult += (j.state?.b || 0); } },
+            { id: 'r2', name: 'คทาแห่งกฎ', faction: 'royal', rarity: 4, cost: 9, icon: '🪄', 
+              desc: 'เล่น Flush ได้ +80 Chips และ +12 Mult',
+              eff: (ctx) => { if(ctx.handName.includes('Flush')) { ctx.addChips += 80; ctx.addMult += 12; } } },
+            { id: 'r3', name: 'อัญมณีบัลลังก์', faction: 'royal', rarity: 4, cost: 9, icon: '💎', 
+              desc: 'เงินที่เกิน 20 เปลี่ยนเป็น Mult x(1 + ส่วนเกิน/15)',
+              eff: (ctx, j, st) => { if(st.money > 20) { ctx.xMult *= (1 + (st.money-20)/15); } } },
+            { id: 'r4', name: 'เกราะมังกร', faction: 'royal', rarity: 4, cost: 12, icon: '🐉', 
+              desc: 'ด่านบอส: ยกเลิกคำสาป 1 อย่าง', isShield: true },
+            { id: 'r5', name: 'จอมเวทย์', faction: 'royal', rarity: 5, cost: 15, icon: '🧙‍♂️', 
+              desc: 'พลังทวีคูณ: ดาเมจสุดท้าย x1.5',
+              eff: (ctx) => { ctx.finalMult *= 1.5; } }
+        ];
+
+        const getTarget = (level) => Math.floor(400 * Math.pow(1.35, level - 1));
+
+        const LEVELS_DB = Array.from({length: 20}, (_, i) => {
+            const level = i + 1; const isBoss = level % 5 === 0;
+            let rule = null, n = "กองทัพกบฏ", ic = "🗡️";
+
+            if (level <= 4) { n = ["โจรป่า", "ทหารรับจ้าง", "หมาป่าดุร้าย", "โครงกระดูกคืนชีพ"][level-1]; ic = ["🪓","🛡️","🐺","💀"][level-1]; }
+            else if (level === 5) { n = "อัศวินดำผู้ทรยศ"; ic = "♟️"; rule = { type: 'ban_suit', suit: 'H', desc: 'ไพ่ถ้วย (Grails) ทำคะแนนไม่ได้' }; }
+            else if (level <= 9) { n = ["แม่มดป่า", "โทรลล์สะพาน", "อัศวินเงา", "โจรสลัดแม่น้ำ"][level-6]; ic = ["🔮","👹","🥷","🏴‍☠️"][level-6]; }
+            else if (level === 10) { n = "ราชินีแม่มดหมอก"; ic = "🧛‍♀️"; rule = { type: 'less_plays', desc: 'จำนวนเล่นไพ่ลดลงเหลือ 3 ครั้ง' }; }
+            else if (level <= 14) { n = ["อัศวินเวทย์", "กริฟฟิน", "ปีศาจคุกใต้ดิน", "นักฆ่าเงาขั้นสูง"][level-11]; ic = ["🪄","🦅","👿","🗡️"][level-11]; }
+            else if (level === 15) { n = "จอมทัพปีศาจ"; ic = "👹"; rule = { type: 'random_ban', desc: 'สุ่มแบน 1 สัญลักษณ์ตลอดด่าน' }; }
+            else if (level <= 19) { n = ["อัศวินมังกร", "เนโครแมนเซอร์", "ผู้พิทักษ์วิหาร", "แชมเปี้ยนประลอง"][level-16]; ic = ["🐲","🧟","🏛️","⚔️"][level-16]; }
+            else if (level === 20) { n = "มังกรโบราณ"; ic = "🐉"; rule = { type: 'final_boss', desc: 'เล่นได้ 3 ครั้ง + แบนไพ่ 1 ชนิด' }; }
+
+            return { level, enemyName: n, enemyIcon: ic, 
+                     target: isBoss && level===20 ? getTarget(level)*2 : getTarget(level), 
+                     reward: 3 + Math.floor(level/2), isBoss, specialRule: rule };
+        });
+
+        const initialState = {
+            scene: 'start', level: 1, money: 4, hp: 0, targetScore: 0,
+            playsLeft: 4, maxPlays: 4, discardsLeft: 3, maxDiscards: 3,
+            deck: [], hand: [], selectedIndices: [], jokers: [], shopItems: [],
+            activeDebuff: null, isAnimating: false, tutorialStep: 0, tutorialSeen: false,
+            stats: { totalDmg: 0, highestLevel: 0, handsPlayed: 0 }
+        };
+        let State = JSON.parse(JSON.stringify(initialState));
+
+        const Logic = {
+            createDeck: () => {
+                let d = [];
+                for (const suit in SUITS) {
+                    for (let i = 0; i < RANKS.length; i++) {
+                        let rank = RANKS[i]; let val = i + 2; 
+                        if (val > 10 && val < 14) val = 10; if (val === 14) val = 11;
+                        d.push({ suit, rank, val, id: `${suit}${rank}` });
+                    }
+                }
+                return Utils.shuffle(d);
+            },
+            draw: (num) => {
+                let drawn = 0;
+                while(drawn < num && State.hand.length < 8) {
+                    if (State.deck.length === 0) {
+                        Utils.showToast("กองไพ่หมด สับไพ่ใหม่", "success");
+                        State.deck = Logic.createDeck();
+                    }
+                    State.hand.push(State.deck.pop());
+                    drawn++;
+                }
+            },
+            evalHand: (cards) => {
+                if (!cards || cards.length === 0) return HAND_TYPES[9]; // High Card zero
+                let ev = cards.map(c => ({...c, v: RANKS.indexOf(c.rank)+2 })).sort((a,b) => b.v - a.v);
+                const isFlush = ev.length >= 5 && ev.every(c => c.suit === ev[0].suit);
+                
+                let isStraight = false;
+                if (ev.length >= 5) {
+                    isStraight = true;
+                    for (let i=0; i<4; i++) if (ev[i].v - 1 !== ev[i+1].v) isStraight = false;
+                    if (!isStraight && ev[0].v === 14) { // A-2-3-4-5
+                        let low = [...ev]; low[0].v = 1; low.sort((a,b)=>b.v-a.v);
+                        isStraight = true;
+                        for (let i=0; i<4; i++) if (low[i].v - 1 !== low[i+1].v) isStraight = false;
+                    }
+                }
+                const counts = {}; ev.forEach(c => counts[c.rank] = (counts[c.rank]||0)+1);
+                const freqs = Object.values(counts).sort((a,b)=>b-a);
+
+                let name = "High Card";
+                if (isFlush && isStraight) name = ev[0].v === 14 ? "Royal Flush" : "Straight Flush";
+                else if (freqs[0] === 4) name = "Four of a Kind";
+                else if (freqs[0] === 3 && freqs[1] >= 2) name = "Full House";
+                else if (isFlush) name = "Flush";
+                else if (isStraight) name = "Straight";
+                else if (freqs[0] === 3) name = "Three of a Kind";
+                else if (freqs[0] === 2 && freqs[1] === 2) name = "Two Pair";
+                else if (freqs[0] === 2) name = "Pair";
+
+                return HAND_TYPES.find(h => h.name === name) || HAND_TYPES[9];
+            },
+            calcScore: (cards) => {
+                const base = Logic.evalHand(cards);
+                let ctx = { 
+                    handName: base.name, playedCards: cards,
+                    baseChips: base.chips, baseMult: base.mult,
+                    addChips: 0, addMult: 0, xMult: 1, finalMult: 1,
+                    pops: []
+                };
+
+                // Add Card values (apply debuffs)
+                cards.forEach(c => {
+                    let cv = c.val;
+                    if (State.activeDebuff && State.activeDebuff.suit === c.suit) cv = 0;
+                    ctx.addChips += cv;
+                });
+
+                // Apply Jokers left to right
+                State.jokers.forEach(j => {
+                    if (j.eff) {
+                        let bC = ctx.addChips, bM = ctx.addMult, bxM = ctx.xMult, fM = ctx.finalMult;
+                        j.eff(ctx, j, State);
+                        if(bC!==ctx.addChips || bM!==ctx.addMult || bxM!==ctx.xMult || fM!==ctx.finalMult) {
+                            ctx.pops.push({ name: j.name, icon: j.icon });
+                        }
+                    }
+                });
+
+                // Resolve order: (BaseC + AddC) * (BaseM + AddM) * xMult * finalMult
+                let totalC = Math.max(0, ctx.baseChips + ctx.addChips);
+                let totalM = Math.max(1, ctx.baseMult + ctx.addMult) * ctx.xMult * ctx.finalMult;
+                if(isNaN(totalC)) totalC = 0; if(isNaN(totalM)) totalM = 1;
+                
+                return { ctx, total: Math.floor(totalC * totalM), C: totalC, M: totalM };
+            }
+        };
+
+        const Controller = {
+            startLevel: () => {
+                const lvl = LEVELS_DB[State.level-1];
+                State.hp = lvl.target; State.targetScore = lvl.target;
+                State.playsLeft = State.maxPlays; State.discardsLeft = State.maxDiscards;
+                State.deck = Logic.createDeck(); State.hand = []; State.selectedIndices = [];
+                State.activeDebuff = null;
+
+                State.jokers.forEach(j => { if(j.onStart) j.onStart(j, State); });
+
+                const hasShield = State.jokers.some(j => j.isShield);
+                if (lvl.specialRule) {
+                    if (hasShield) { Utils.showToast("เกราะมังกรทำงาน! หักล้างคำสาปบอส", "success"); } 
+                    else {
+                        let r = lvl.specialRule;
+                        if(r.type === 'ban_suit') State.activeDebuff = { suit: r.suit, desc: r.desc };
+                        if(r.type === 'random_ban' || r.type === 'final_boss') {
+                            const s = Object.keys(SUITS)[Math.floor(Math.random()*4)];
+                            State.activeDebuff = { suit: s, desc: `แบนไพ่ ${SUITS[s].name} ไม่ให้คะแนน` };
+                        }
+                        if(r.type === 'less_plays' || r.type === 'final_boss') State.playsLeft = 3;
+                    }
+                }
+                Logic.draw(8);
+                State.scene = 'battle';
+                
+                // Tutorial
+                if (State.level === 1 && !State.tutorialSeen) State.tutorialStep = 1;
+                Render();
+            },
+            toggle: (i) => {
+                if (State.isAnimating || (State.tutorialStep > 0 && State.tutorialStep !== 2)) return;
+                SoundManager.play('select');
+                const idx = State.selectedIndices.indexOf(i);
+                if (idx > -1) State.selectedIndices.splice(idx, 1);
+                else {
+                    if (State.selectedIndices.length < 5) State.selectedIndices.push(i);
+                    else Utils.showToast("เลือกไพ่ได้สูงสุด 5 ใบ");
+                }
+                if(State.tutorialStep===2 && State.selectedIndices.length>0) State.tutorialStep=3;
+                Render();
+            },
+            playHand: async () => {
+                if (State.isAnimating || State.playsLeft <= 0) return;
+                if (State.selectedIndices.length === 0) { Utils.showToast("ท่านยังมิได้เลือกไพ่!", "error"); return; }
+                
+                if(State.tutorialStep===3) State.tutorialStep=4;
+                State.isAnimating = true; Render();
+                SoundManager.play('play');
+
+                const sel = State.selectedIndices.map(i => State.hand[i]);
+                const res = Logic.calcScore(sel);
+                
+                await Utils.sleep(300);
+                // Sequence animations
+                Controller.spawnText(`[${res.ctx.handName}]`, 'text-blue-300 text-3xl text-shadow-gold', 0, -30);
+                await Utils.sleep(400);
+
+                let curC = res.ctx.baseChips, curM = res.ctx.baseMult;
+                
+                for(let c of sel) {
+                    let v = (State.activeDebuff && State.activeDebuff.suit===c.suit) ? 0 : c.val;
+                    if(v>0) { Controller.spawnText(`+${v} Chips`, 'text-gray-300', Math.random()*40-20, Math.random()*20); }
+                    else { Controller.spawnText(`Block!`, 'text-red-500', 0, 0); }
+                    SoundManager.play('select');
+                    await Utils.sleep(150);
+                }
+
+                for(let j of res.ctx.pops) {
+                    Controller.spawnText(`${j.icon} บัพทำงาน!`, 'text-yellow-400 text-2xl', Math.random()*60-30, -20);
+                    SoundManager.play('joker');
+                    await Utils.sleep(300);
+                }
+
+                SoundManager.play('hit');
+                document.getElementById('app').classList.add('shake');
+                setTimeout(()=>document.getElementById('app').classList.remove('shake'), 400);
+                Controller.spawnText(`🔥 ${Utils.formatNum(res.total)} Dmg!`, 'text-red-500 text-5xl text-shadow-red', 0, 0);
+                
+                State.hp = Math.max(0, State.hp - res.total);
+                State.stats.totalDmg += res.total; State.stats.handsPlayed++;
+                State.playsLeft--;
+                
+                State.hand = State.hand.filter((_, i) => !State.selectedIndices.includes(i));
+                State.selectedIndices = [];
+                Render();
+
+                await Utils.sleep(1000);
+
+                if (State.hp <= 0) await Controller.handleWin();
+                else if (State.playsLeft <= 0) State.scene = 'gameover';
+                else Logic.draw(8 - State.hand.length);
+                
+                State.isAnimating = false;
+                Render();
+                if(State.scene === 'gameover') SoundManager.play('play'); // loss sound variant
+            },
+            discard: async () => {
+                if (State.isAnimating || State.discardsLeft <= 0) return;
+                if (State.selectedIndices.length === 0) { Utils.showToast("เลือกไพ่ที่ต้องการทิ้ง"); return; }
+                
+                State.isAnimating = true; Render(); SoundManager.play('select');
+                State.jokers.forEach(j => { if(j.onDiscard) j.onDiscard(j, State); });
+                
+                State.hand = State.hand.filter((_, i) => !State.selectedIndices.includes(i));
+                State.selectedIndices = []; State.discardsLeft--;
+                
+                await Utils.sleep(300);
+                Logic.draw(8 - State.hand.length);
+                State.isAnimating = false; Render();
+            },
+            handleWin: async () => {
+                SoundManager.play('win');
+                State.jokers.forEach(j => { if(j.onWin) j.onWin(j, State); });
+                State.jokers.forEach(j => { if(j.onEnd) j.onEnd(j, State); });
+                
+                let r = LEVELS_DB[State.level-1].reward;
+                State.money += r; State.stats.highestLevel = Math.max(State.stats.highestLevel, State.level);
+                
+                if (State.level === 20) State.scene = 'victory';
+                else {
+                    State.level++; Controller.genShop(); State.scene = 'shop';
+                    Storage.save({ tutorialSeen: State.tutorialSeen, stats: State.stats });
+                }
+            },
+            genShop: () => {
+                State.shopItems = []; const pool = [...JOKERS_DB];
+                while(State.shopItems.length < 3) {
+                    let r = Math.random(), maxR = 2;
+                    if(r>0.8) maxR=3; if(r>0.95) maxR=5;
+                    let cands = pool.filter(j => j.rarity <= maxR && !State.jokers.some(o=>o.id===j.id) && !State.shopItems.some(s=>s.id===j.id));
+                    if(cands.length > 0) State.shopItems.push(cloneJoker(cands[Math.floor(Math.random()*cands.length)]));
+                    else break;
+                }
+            },
+            buy: (i) => {
+                const item = State.shopItems[i]; if(!item) return;
+                if(State.money < item.cost) { Utils.showToast("เงินไม่พอ!"); return; }
+                if(State.jokers.length >= 5) { Utils.showToast("ช่องวิญญาณเต็ม! ต้องขายก่อน"); return; }
+                
+                State.money -= item.cost; State.jokers.push(item);
+                State.shopItems.splice(i,1); SoundManager.play('coin'); Render();
+            },
+            sell: (i) => {
+                const j = State.jokers[i]; if(!j) return;
+                const rf = Math.floor(j.cost / 2);
+                State.money += rf; State.jokers.splice(i,1);
+                SoundManager.play('coin'); Utils.showToast(`ขายได้รับ ${rf} 🪙`, "success"); Render();
+            },
+            reroll: () => {
+                if(State.money < 2) { Utils.showToast("เงินไม่พอ (ใช้ 2 🪙)"); return; }
+                State.money -= 2; Controller.genShop(); SoundManager.play('select'); Render();
+            },
+            spawnText: (txt, cls, xOff=0, yOff=0) => {
+                const c = document.getElementById('damage-container');
+                const el = document.createElement('div');
+                el.className = `damage-popup font-medieval ${cls}`;
+                el.innerText = txt;
+                el.style.marginLeft = `${xOff}px`; el.style.marginTop = `${yOff}px`;
+                c.appendChild(el);
+                setTimeout(()=>el.remove(), 1500);
+            }
+        };
+
+        const Render = () => {
+            const app = document.getElementById('app');
+            const bg = document.getElementById('bg-overlay');
+            let h = '';
+
+            if (State.scene === 'battle') {
+                bg.style.backgroundColor = State.level<=5 ? "rgba(20,30,10,0.6)" : State.level<=10 ? "rgba(20,10,30,0.6)" : State.level<=15 ? "rgba(40,10,10,0.6)" : "rgba(60,20,0,0.7)";
+            } else { bg.style.backgroundColor = "rgba(10,10,10,0.8)"; }
+
+            if (State.scene === 'start') {
+                h = `<div class="flex flex-col items-center justify-center h-full text-center p-4">
+                        <h1 class="font-medieval text-5xl md:text-7xl text-gold-400 mb-2 text-shadow-gold tracking-wider">SpiritJoke</h1>
+                        <h2 class="font-body text-xl md:text-2xl text-parchment-dark mb-10 tracking-widest">Medieval Deckbuilder</h2>
+                        <button onclick="SoundManager.init(); State.scene='map'; Render();" class="px-10 py-3 bg-stone-850 border-2 border-gold-600 rounded text-gold-400 font-medieval text-2xl hover:bg-stone-900 transition shadow-glow-gold hover:-translate-y-1 transform">
+                            เริ่มผจญภัย
+                        </button>
+                    </div>`;
+            } 
+            else if (State.scene === 'map') {
+                const lvl = LEVELS_DB[State.level-1];
+                h = `<div class="flex flex-col items-center h-full p-6 overflow-y-auto">
+                        <h2 class="font-medieval text-4xl text-gold-400 mb-6 text-shadow-gold">เส้นทางสู่บัลลังก์</h2>
+                        <div class="w-full max-w-md bg-stone-900/90 border border-gold-800 rounded-lg p-6 flex flex-col items-center justify-center gap-4 relative shadow-card">
+                            <div class="text-parchment-dark text-xl font-bold border-b border-stone-700 pb-2 w-full text-center">ด่านที่ ${State.level} / 20</div>
+                            <div class="text-7xl animate-float mt-4 mb-2 drop-shadow-xl">${lvl.enemyIcon}</div>
+                            <h3 class="font-medieval text-3xl text-red-400 text-shadow text-center">${lvl.enemyName}</h3>
+                            ${lvl.isBoss ? `<div class="text-yellow-500 font-bold px-6 py-1 bg-red-900/40 rounded border border-red-700 animate-pulse mt-2">⚔️ บอสประจำถิ่น ⚔️</div>` : ''}
+                            <div class="text-center space-y-2 mt-4 bg-stone-950 p-4 rounded w-full border border-stone-800">
+                                <p class="text-lg">เป้าหมาย (HP): <span class="text-gold-400 font-bold text-xl">${Utils.formatNum(lvl.target)}</span></p>
+                                ${lvl.specialRule ? `<p class="text-red-400 text-sm mt-2 font-bold">⚠️ คำสาป: ${lvl.specialRule.desc}</p>` : ''}
+                            </div>
+                        </div>
+                        <button onclick="Controller.startLevel()" class="mt-8 px-10 py-3 bg-stone-850 border border-red-500 rounded text-red-400 font-medieval text-2xl hover:bg-red-950 transition shadow-glow-red">
+                            บุกโจมตี
+                        </button>
+                    </div>`;
+            }
+            else if (State.scene === 'battle') {
+                const lvl = LEVELS_DB[State.level-1];
+                const hpPct = Math.max(0, (State.hp / State.targetScore) * 100);
+                
+                let preview = "";
+                if (State.selectedIndices.length > 0) {
+                    const sc = State.selectedIndices.map(i => State.hand[i]);
+                    const p = Logic.calcScore(sc);
+                    preview = `<div class="absolute -top-14 left-1/2 transform -translate-x-1/2 bg-stone-950/95 border border-gold-600 px-6 py-2 rounded text-gold-400 text-sm whitespace-nowrap z-20 shadow-lg font-bold">
+                        ${p.ctx.handName}: ${Utils.formatNum(p.C)} x ${Utils.formatNum(p.M)} = <span class="text-red-400 text-lg">${Utils.formatNum(p.total)}</span>
+                    </div>`;
+                }
+
+                h = `
+                    <div class="w-full flex justify-between items-start p-2 md:p-4 bg-stone-950/90 border-b border-stone-800 z-10 shadow-md">
+                        <div class="flex gap-2 min-h-[4rem]">
+                            ${State.jokers.map(j => `
+                                <div class="w-12 h-16 md:w-16 md:h-20 rounded joker-card tooltip flex flex-col items-center justify-center text-2xl md:text-3xl ${FACTIONS[j.faction].color} ${FACTIONS[j.faction].bg} shadow-sm">
+                                    ${j.icon}
+                                    <div class="tooltip-text absolute w-48 bg-stone-900 border border-gold-600 text-sm p-3 rounded text-parchment z-50 shadow-2xl">
+                                        <div class="font-bold text-gold-400 text-base mb-1">${j.name}</div>
+                                        <div class="text-xs text-stone-400 mb-2 border-b border-stone-700 pb-1">${FACTIONS[j.faction].name}</div>
+                                        <div class="leading-tight">${j.desc}</div>
+                                    </div>
+                                </div>`).join('')}
+                            ${[...Array(5 - State.jokers.length)].map(() => `<div class="w-12 h-16 md:w-16 md:h-20 rounded border-2 border-dashed border-stone-700 bg-stone-900/30"></div>`).join('')}
+                        </div>
+                        <div class="text-right text-sm md:text-base bg-stone-900/80 p-2 rounded border border-stone-800 shadow-inner">
+                            <div class="text-stone-300 font-bold mb-1">ด่าน ${State.level}/20</div>
+                            <div class="text-yellow-400 font-bold flex items-center justify-end gap-1">🪙 ${State.money}</div>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 flex flex-col items-center justify-center p-4 relative z-0">
+                        ${State.activeDebuff ? `<div class="absolute top-4 bg-red-950/90 border border-red-500 text-red-200 px-6 py-2 rounded-full text-sm font-bold shadow-glow-red z-10">⚠️ ${State.activeDebuff.desc}</div>` : ''}
+                        
+                        <div class="text-8xl md:text-9xl mb-6 animate-float text-shadow-gold drop-shadow-2xl filter saturate-150">${lvl.enemyIcon}</div>
+                        
+                        <div class="w-full max-w-md bg-stone-950 border-2 border-stone-700 h-8 rounded-full overflow-hidden relative shadow-card">
+                            <div class="absolute top-0 left-0 h-full bg-gradient-to-r from-red-800 to-red-500 transition-all duration-500 ease-out" style="width: ${hpPct}%"></div>
+                            <div class="absolute inset-0 flex items-center justify-center text-sm font-bold text-white text-shadow-red font-medieval tracking-wider">
+                                ${Utils.formatNum(State.hp)} / ${Utils.formatNum(State.targetScore)}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="w-full bg-stone-950/95 border-t-2 border-gold-800/50 p-4 pb-6 z-20 shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+                        <div class="flex justify-between items-end mb-6 max-w-3xl mx-auto relative px-2">
+                            ${preview}
+                            <button onclick="Controller.playHand()" class="px-5 md:px-10 py-3 md:py-4 rounded border font-medieval text-lg md:text-xl transition-all font-bold ${State.playsLeft > 0 ? 'bg-gradient-to-b from-blue-800 to-blue-950 border-blue-400 text-blue-100 hover:from-blue-700 hover:to-blue-900 shadow-glow-gold' : 'bg-stone-800 border-stone-600 text-stone-500'}" ${State.playsLeft<=0 || State.isAnimating ? 'disabled' : ''}>
+                                ร่ายเวทย์ (${State.playsLeft})
+                            </button>
+                            
+                            <div class="text-center font-medieval text-stone-400 text-xs md:text-sm bg-stone-900 px-4 py-1 rounded-full border border-stone-700 hidden md:block">
+                                เลือกสูงสุด 5 ใบ
+                            </div>
+
+                            <button onclick="Controller.discard()" class="px-5 md:px-10 py-3 md:py-4 rounded border font-medieval text-lg md:text-xl transition-all font-bold ${State.discardsLeft > 0 ? 'bg-gradient-to-b from-red-800 to-red-950 border-red-400 text-red-100 hover:from-red-700 hover:to-red-900 shadow-card' : 'bg-stone-800 border-stone-600 text-stone-500'}" ${State.discardsLeft<=0 || State.isAnimating ? 'disabled' : ''}>
+                                ทิ้งไพ่ (${State.discardsLeft})
+                            </button>
+                        </div>
+
+                        <div class="flex justify-center gap-2 md:gap-3 flex-wrap max-w-4xl mx-auto">
+                            ${State.hand.map((c, i) => {
+                                const sel = State.selectedIndices.includes(i);
+                                const deb = State.activeDebuff && State.activeDebuff.suit === c.suit;
+                                return `
+                                <div onclick="Controller.toggle(${i})" class="card-container cursor-pointer w-[12%] min-w-[50px] max-w-[80px]">
+                                    <div class="card w-full aspect-[2/3] flex flex-col items-center justify-center ${sel ? 'selected' : ''} ${State.isAnimating ? 'disabled' : ''} ${deb ? 'opacity-40 grayscale' : ''}">
+                                        <div class="${SUITS[c.suit].css} font-bold text-lg md:text-2xl">${c.rank}</div>
+                                        <div class="text-2xl md:text-4xl mt-1 drop-shadow-md">${SUITS[c.suit].symbol}</div>
+                                    </div>
+                                </div>
+                            `}).join('')}
+                        </div>
+                    </div>`;
+
+                if (State.tutorialStep > 0) {
+                    let msg = "", pos = "top-1/4 left-1/2 transform -translate-x-1/2";
+                    if (State.tutorialStep === 1) { msg = "ยินดีต้อนรับนักผจญภัย! เป้าหมายคือทำดาเมจให้ถึง HP ของศัตรู (หลอดสีแดง) ก่อนสิทธิ์ร่ายเวทย์จะหมด"; }
+                    else if (State.tutorialStep === 2) { msg = "คลิก/แตะ ที่ไพ่ด้านล่าง 1-5 ใบ เพื่อจัดชุดไพ่โป๊กเกอร์ (เช่น เลขเดียวกัน หรือสีเดียวกัน)"; pos = "bottom-40 left-1/2 transform -translate-x-1/2"; }
+                    else if (State.tutorialStep === 3) { msg = "ดูตัวคูณที่ลอยขึ้นมา! กดปุ่ม 'ร่ายเวทย์' เพื่อโจมตี (ยิ่งจัดไพ่ดี Chips และ Mult ยิ่งสูง)"; pos = "bottom-40 left-1/4 transform -translate-x-1/4"; }
+                    else if (State.tutorialStep === 4) {
+                        msg = "หากไพ่ในมือไม่ดี สามารถเลือกไพ่แล้วกด 'ทิ้งไพ่' เพื่อจั่วใหม่ได้! ขอให้โชคดี...";
+                        State.tutorialSeen = true; Storage.save({tutorialSeen: true});
+                        setTimeout(() => { State.tutorialStep = 0; Render(); }, 4500);
+                    }
+                    if (State.tutorialStep < 4) {
+                        h += `<div class="absolute inset-0 z-[55] bg-black/60 pointer-events-none"></div>
+                              <div class="absolute ${pos} z-[60] bg-parchment text-stone-950 p-6 rounded-lg border-4 border-gold-600 shadow-[0_0_30px_rgba(255,215,0,0.4)] max-w-sm text-center pointer-events-auto">
+                                <p class="mb-5 text-lg font-bold">${msg}</p>
+                                <button onclick="State.tutorialStep++; ${State.tutorialStep===2?'State.tutorialSeen=true':''}; SoundManager.play('select'); Render();" class="px-6 py-2 bg-stone-900 text-gold-400 rounded hover:bg-stone-800 border border-gold-600 font-bold transition shadow-card">
+                                    ${State.tutorialStep === 1 ? 'เข้าใจแล้ว' : (State.tutorialStep === 2 ? 'กำลังเลือก...' : 'ลุยเลย!')}
+                                </button>
+                                <button onclick="State.tutorialStep=0; State.tutorialSeen=true; Storage.save({tutorialSeen:true}); Render();" class="absolute top-2 right-3 text-red-700 hover:text-red-900 text-sm underline font-bold">ข้ามสอน (Skip)</button>
+                              </div>`;
+                    }
+                }
+            }
+            else if (State.scene === 'shop') {
+                h = `<div class="flex flex-col h-full p-4 md:p-6 bg-stone-950 overflow-y-auto max-w-5xl mx-auto w-full">
+                        <div class="flex flex-wrap justify-between items-center mb-4 border-b border-stone-800 pb-3 gap-2">
+                            <div>
+                                <h2 class="font-medieval text-3xl md:text-4xl text-gold-400 text-shadow-gold">ตลาดพ่อค้าเร่</h2>
+                                <p class="text-xs md:text-sm text-stone-400">เลือกซื้อวิญญาณโจ๊กเกอร์ (สะสมได้สูงสุด 5 ใบ)</p>
+                            </div>
+                            <div class="text-2xl md:text-3xl text-yellow-400 bg-stone-900 px-4 py-2 rounded-lg border border-stone-700 shadow-inner font-bold flex items-center gap-2">
+                                🪙 <span>${State.money}</span>
+                            </div>
+                        </div>
+
+                        <!-- Shop Cards Grid -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+                            ${State.shopItems.map((it, i) => `
+                                <div class="bg-stone-900 border-2 ${FACTIONS[it.faction].color} rounded-xl p-4 flex flex-col justify-between items-center text-center shadow-card relative hover:border-gold-400 transition-all">
+                                    <div class="text-4xl md:text-5xl my-2 drop-shadow-md">${it.icon}</div>
+                                    <div class="font-bold text-gold-400 text-base md:text-lg mb-1">${it.name}</div>
+                                    <div class="text-xs text-stone-400 mb-2 bg-stone-950 px-2 py-0.5 rounded-full border border-stone-800 inline-block">${FACTIONS[it.faction].name}</div>
+                                    <div class="text-xs md:text-sm text-parchment my-2 flex-1 leading-relaxed bg-stone-950/40 p-2 rounded w-full border border-stone-800/50">${it.desc}</div>
+                                    <button onclick="Controller.buy(${i})" class="w-full py-2.5 mt-2 bg-stone-800 border border-gold-600 text-gold-400 rounded-lg hover:bg-gold-600 hover:text-stone-950 transition-colors font-bold text-sm md:text-base shadow-sm ${State.money < it.cost ? 'disabled opacity-50 cursor-not-allowed' : ''}">
+                                        ซื้อ (${it.cost} 🪙)
+                                    </button>
+                                </div>`).join('')}
+                            ${State.shopItems.length === 0 ? '<div class="col-span-full text-stone-500 py-8 text-center text-lg font-medieval">สินค้าถูกซื้อหมดแล้ว...</div>' : ''}
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="flex flex-wrap justify-center gap-4 mb-6">
+                            <button onclick="Controller.reroll()" class="px-6 py-2.5 bg-stone-900 border border-stone-600 text-parchment rounded-lg hover:bg-stone-800 transition font-bold text-sm md:text-base shadow-card flex items-center gap-2" ${State.money < 2 ? 'disabled opacity-50' : ''}>
+                                🔄 สุ่มของใหม่ (2 🪙)
+                            </button>
+                            <button onclick="State.scene = 'map'; SoundManager.play('select'); Render();" class="px-8 py-2.5 bg-gradient-to-r from-blue-900 to-blue-800 border border-blue-400 text-blue-100 rounded-lg hover:from-blue-800 hover:to-blue-700 transition font-bold text-sm md:text-base shadow-glow-gold flex items-center gap-2">
+                                ออกเดินทางต่อ ➔
+                            </button>
+                        </div>
+
+                        <!-- Current Inventory -->
+                        <div class="mt-auto border-t border-stone-800 pt-4 bg-stone-900/60 rounded-xl p-4">
+                            <div class="text-sm text-stone-300 mb-3 text-center font-bold">วิญญาณโจ๊กเกอร์ที่คุณถืออยู่ (${State.jokers.length}/5) - คลิกที่ใบใดก็ได้เพื่อขายคืน 50%</div>
+                            <div class="flex flex-wrap gap-3 justify-center">
+                                ${State.jokers.map((j, i) => `
+                                    <div onclick="Controller.sell(${i})" class="w-20 md:w-24 bg-stone-950 border-2 ${FACTIONS[j.faction].color} rounded-lg p-2 flex flex-col items-center justify-between cursor-pointer hover:border-red-500 transition-all tooltip relative shadow-md group">
+                                        <div class="text-2xl md:text-3xl">${j.icon}</div>
+                                        <div class="text-[10px] md:text-xs text-gold-400 font-bold truncate w-full text-center mt-1">${j.name}</div>
+                                        <div class="text-[10px] text-red-400 font-bold mt-1 group-hover:text-red-300">ขาย +${Math.floor(j.cost/2)}🪙</div>
+                                        <div class="tooltip-text absolute bottom-full mb-2 bg-stone-900 border border-gold-600 text-xs p-2 rounded text-parchment z-50 w-48 text-left shadow-2xl pointer-events-none">
+                                            <div class="font-bold text-gold-400 mb-1">${j.name}</div>
+                                            <div class="text-stone-300 leading-tight">${j.desc}</div>
+                                        </div>
+                                    </div>`).join('')}
+                                ${[...Array(5 - State.jokers.length)].map(() => `<div class="w-20 md:w-24 h-24 md:h-28 rounded-lg border-2 border-dashed border-stone-700 bg-stone-900/30 flex items-center justify-center text-stone-600 text-xs font-bold">ว่าง</div>`).join('')}
+                            </div>
+                        </div>
+                    </div>`;
+            }
+            else if (State.scene === 'gameover' || State.scene === 'victory') {
+                const isW = State.scene === 'victory';
+                h = `<div class="flex flex-col items-center justify-center h-full text-center p-6 bg-stone-950/95 relative overflow-hidden">
+                        ${isW ? '<div class="absolute inset-0 z-0 bg-[url(\'data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%2250%22 font-size=%2250%22 opacity=%220.05%22>👑</text></svg>\')] bg-repeat opacity-20"></div>' : ''}
+                        
+                        <h1 class="font-medieval text-5xl md:text-7xl mb-8 z-10 ${isW ? 'text-gold-400 text-shadow-gold' : 'text-red-600 text-shadow-red'}">
+                            ${isW ? '👑 ผู้กล้าผู้พิชิตบัลลังก์!' : '💀 ท่านได้พ่ายแพ้...'}
+                        </h1>
+                        
+                        <div class="bg-stone-900 border ${isW ? 'border-gold-600' : 'border-red-800'} p-8 rounded-xl mb-10 max-w-md w-full shadow-card z-10">
+                            <h3 class="text-2xl text-parchment-dark mb-6 border-b border-stone-700 pb-3 font-medieval">สถิติการผจญภัย</h3>
+                            <div class="space-y-4 text-left text-lg font-body">
+                                <p class="flex justify-between"><span>ไปถึงด่าน:</span> <span class="${isW?'text-gold-400':'text-red-400'} font-bold">${State.level} / 20</span></p>
+                                <p class="flex justify-between"><span>ความเสียหายรวม:</span> <span class="text-red-400 font-bold">${Utils.formatNum(State.stats.totalDmg)}</span></p>
+                                <p class="flex justify-between"><span>เล่นไพ่ไปทั้งหมด:</span> <span class="text-blue-300 font-bold">${State.stats.handsPlayed} ครั้ง</span></p>
+                            </div>
+                        </div>
+
+                        <button onclick="State = JSON.parse(JSON.stringify(initialState)); const s = Storage.load(); if(s) { State.tutorialSeen = s.tutorialSeen; State.stats = s.stats; } State.scene='start'; SoundManager.play('select'); Render();" class="px-10 py-4 bg-stone-850 border-2 ${isW?'border-gold-400 text-gold-400 shadow-glow-gold':'border-red-500 text-red-400 shadow-glow-red'} rounded-lg font-medieval text-2xl hover:bg-stone-900 transition z-10 transform hover:scale-105">
+                            ผจญภัยใหม่อีกครั้ง
+                        </button>
+                    </div>`;
+            }
+
+            app.innerHTML = h;
+        };
+
+        window.onload = () => {
+            const saved = Storage.load();
+            if (saved) {
+                State.tutorialSeen = saved.tutorialSeen || false;
+                State.stats = saved.stats || initialState.stats;
+            }
+            Render();
+            SoundManager.init(); // Attempt init, though browser policy requires user interaction first
+        };
+    </script>
+</body>
+</html>
