@@ -69,6 +69,7 @@
             background: linear-gradient(to bottom right, #2a2420, #141210);
             border: 2px solid;
             transition: transform 0.2s;
+            position: relative;
         }
         .joker-card:hover { transform: translateY(-5px) scale(1.1); z-index: 10; }
 
@@ -118,6 +119,27 @@
         }
         .shake { animation: screenShake 0.4s; }
 
+        @keyframes enemyFlash {
+            0% { filter: brightness(1) drop-shadow(0 0 0 rgba(255,60,60,0)); transform: scale(1); }
+            25% { filter: brightness(2.2) drop-shadow(0 0 25px rgba(255,60,60,0.95)); transform: scale(0.9) rotate(-2deg); }
+            100% { filter: brightness(1) drop-shadow(0 0 0 rgba(255,60,60,0)); transform: scale(1) rotate(0deg); }
+        }
+        .enemy-hit { animation: enemyFlash 0.4s ease-out; }
+
+        @keyframes rarityPulse {
+            0%, 100% { box-shadow: 0 0 8px 2px rgba(255,215,0,0.4); }
+            50% { box-shadow: 0 0 18px 5px rgba(255,215,0,0.85); }
+        }
+        .rarity-glow-3 { box-shadow: 0 0 8px 2px rgba(255,215,0,0.35); }
+        .rarity-glow-4 { box-shadow: 0 0 12px 3px rgba(255,215,0,0.6); }
+        .rarity-glow-5 { animation: rarityPulse 1.8s ease-in-out infinite; }
+
+        @keyframes confettiFall {
+            0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(105vh) rotate(360deg); opacity: 0; }
+        }
+        .confetti-piece { position: absolute; top: -10px; will-change: transform, opacity; }
+
         .tooltip .tooltip-text {
             visibility: hidden; opacity: 0; transition: opacity 0.2s;
             bottom: 120%; left: 50%; transform: translateX(-50%);
@@ -133,16 +155,97 @@
 </head>
 <body class="font-body text-parchment h-screen w-screen flex flex-col relative" id="body">
 
+    <!-- Main Container -->
     <div id="app" class="w-full h-full flex flex-col relative z-10"></div>
     <div id="toast-container" class="absolute top-[10%] left-1/2 transform -translate-x-1/2 z-50 flex flex-col items-center gap-2"></div>
+    
     <!-- Dedicated container for absolute centered popups -->
     <div id="damage-container" class="absolute inset-0 pointer-events-none z-40 overflow-hidden"></div>
     <div id="bg-overlay" class="absolute inset-0 bg-black/50 z-0 pointer-events-none transition-colors duration-1000"></div>
     
-    <!-- Audio Toggle -->
-    <button id="btn-audio" onclick="SoundManager.toggleMute()" class="absolute top-4 right-4 z-50 w-10 h-10 bg-stone-900 border border-gold-600 rounded-full flex items-center justify-center text-xl shadow-card hover:bg-stone-800 transition-colors">
-        🔊
-    </button>
+    <!-- Audio Toggles -->
+    <div class="absolute top-4 right-4 z-50 flex gap-2">
+        <button id="btn-music" onclick="SoundManager.toggleMusic()" title="เพลงพื้นหลัง" class="w-10 h-10 bg-stone-900 border border-gold-600 rounded-full flex items-center justify-center text-xl shadow-card hover:bg-stone-800 transition-colors">
+            🎵
+        </button>
+        <button id="btn-audio" onclick="SoundManager.toggleMute()" title="เสียงประกอบ" class="w-10 h-10 bg-stone-900 border border-gold-600 rounded-full flex items-center justify-center text-xl shadow-card hover:bg-stone-800 transition-colors">
+            🔊
+        </button>
+    </div>
+
+    <!-- Confetti layer for Victory -->
+    <div id="confetti-layer" class="fixed inset-0 z-[65] pointer-events-none overflow-hidden"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'spiritjoke-app';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+
+        window.Leaderboard = {
+            scores: [],
+            isReady: false,
+            user: null,
+            db: null,
+            
+            init: async function() {
+                if (!firebaseConfig) return;
+                try {
+                    const app = initializeApp(firebaseConfig);
+                    this.db = getFirestore(app);
+                    const auth = getAuth(app);
+                    
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    
+                    this.user = auth.currentUser;
+                    this.isReady = true;
+                    this.listen();
+                } catch(e) { console.warn("Leaderboard error", e); }
+            },
+            
+            listen: function() {
+                if (!this.db) return;
+                const colRef = collection(this.db, 'artifacts', appId, 'public', 'data', 'leaderboard');
+                onSnapshot(colRef, (snapshot) => {
+                    const list = [];
+                    snapshot.forEach(doc => {
+                        list.push({ id: doc.id, ...doc.data() });
+                    });
+                    this.scores = list;
+                    if (typeof Render === 'function' && typeof State !== 'undefined' && State.scene === 'leaderboard') {
+                        Render();
+                    }
+                }, (err) => console.warn("Leaderboard snapshot error", err));
+            },
+
+            submitScore: async function(name, mode, level, damage) {
+                if (!this.isReady || !this.user) return false;
+                try {
+                    const docRef = doc(this.db, 'artifacts', appId, 'public', 'data', 'leaderboard', `${this.user.uid}_${mode}`);
+                    await setDoc(docRef, {
+                        playerName: name || 'นักผจญภัยไร้นาม',
+                        gameMode: mode,
+                        level: level,
+                        totalDmg: damage,
+                        timestamp: Date.now(),
+                        uid: this.user.uid
+                    }, { merge: true });
+                    return true;
+                } catch(e) {
+                    console.warn("Submit score failed", e);
+                    return false;
+                }
+            }
+        };
+
+        window.Leaderboard.init();
+    </script>
 
     <script>
         const Utils = {
@@ -173,20 +276,41 @@
                     toast.classList.add('-translate-y-4', 'opacity-0');
                     setTimeout(() => toast.remove(), 300);
                 }, 2000);
+            },
+            spawnConfetti: () => {
+                const container = document.getElementById('confetti-layer');
+                if (!container) return;
+                container.innerHTML = '';
+                const colors = ['#ffd700', '#ef4444', '#3b82f6', '#10b981', '#a855f7', '#f97316'];
+                for (let i = 0; i < 40; i++) {
+                    const el = document.createElement('div');
+                    el.className = 'confetti-piece';
+                    el.style.left = `${Math.random() * 100}%`;
+                    el.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                    el.style.width = `${Math.random() * 8 + 6}px`;
+                    el.style.height = `${Math.random() * 12 + 8}px`;
+                    el.style.animation = `confettiFall ${2.5 + Math.random() * 2}s linear infinite`;
+                    el.style.animationDelay = `${Math.random() * 2}s`;
+                    container.appendChild(el);
+                }
             }
         };
 
         const SoundManager = {
-            ctx: null, muted: false, initialized: false,
+            ctx: null, muted: false, musicMuted: false, initialized: false, musicNodes: null,
             init: function() {
                 if (this.initialized) return;
                 try {
                     const AudioContext = window.AudioContext || window.webkitAudioContext;
                     this.ctx = new AudioContext();
                     this.initialized = true;
-                    // Load preference
-                    const saved = localStorage.getItem('spiritjoke_muted');
-                    if(saved === 'true') { this.muted = true; this.updateUI(); }
+                    // Load preferences
+                    const savedSfx = localStorage.getItem('spiritjoke_muted');
+                    if(savedSfx === 'true') this.muted = true;
+                    const savedMusic = localStorage.getItem('spiritjoke_music_muted');
+                    if(savedMusic === 'true') this.musicMuted = true;
+                    this.updateUI();
+                    if(!this.musicMuted) this.startMusic();
                 } catch(e) { console.warn("AudioContext not supported", e); }
             },
             toggleMute: function() {
@@ -195,8 +319,49 @@
                 this.updateUI();
                 if(!this.muted) this.play('select');
             },
+            toggleMusic: function() {
+                this.musicMuted = !this.musicMuted;
+                try { localStorage.setItem('spiritjoke_music_muted', this.musicMuted); } catch(e){}
+                if(this.musicMuted) this.stopMusic(); else this.startMusic();
+                this.updateUI();
+            },
+            startMusic: function() {
+                if (!this.ctx || this.musicNodes || this.musicMuted) return;
+                try {
+                    if (this.ctx.state === 'suspended') this.ctx.resume();
+                    const ctx = this.ctx;
+                    const master = ctx.createGain();
+                    master.gain.value = 0.045;
+                    master.connect(ctx.destination);
+
+                    const osc1 = ctx.createOscillator(); osc1.type = 'sine'; osc1.frequency.value = 98;
+                    const osc2 = ctx.createOscillator(); osc2.type = 'sine'; osc2.frequency.value = 98.6;
+                    const osc3 = ctx.createOscillator(); osc3.type = 'triangle'; osc3.frequency.value = 147;
+                    osc1.connect(master); osc2.connect(master); osc3.connect(master);
+                    osc1.start(); osc2.start(); osc3.start();
+
+                    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.06;
+                    const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.02;
+                    lfo.connect(lfoGain); lfoGain.connect(master.gain);
+                    lfo.start();
+
+                    this.musicNodes = { master, osc1, osc2, osc3, lfo };
+                } catch(e) { console.warn("Music start failed", e); }
+            },
+            stopMusic: function() {
+                if (!this.musicNodes) return;
+                try {
+                    const n = this.musicNodes;
+                    [n.osc1, n.osc2, n.osc3, n.lfo].forEach(o => { try { o.stop(); } catch(e){} });
+                    n.master.disconnect();
+                } catch(e) { /* noop */ }
+                this.musicNodes = null;
+            },
             updateUI: function() {
-                document.getElementById('btn-audio').innerText = this.muted ? '🔇' : '🔊';
+                const audioBtn = document.getElementById('btn-audio');
+                const musicBtn = document.getElementById('btn-music');
+                if (audioBtn) audioBtn.innerText = this.muted ? '🔇' : '🔊';
+                if (musicBtn) musicBtn.innerText = this.musicMuted ? '🔈' : '🎵';
             },
             play: function(type) {
                 if(this.muted || !this.ctx) return;
@@ -250,8 +415,12 @@
                 } catch(e) { console.warn("Sound play failed", e); }
             }
         };
-        // Bind sound init to first click
-        document.addEventListener('click', () => SoundManager.init(), {once:true});
+
+        // Resume AudioContext on user click
+        document.addEventListener('click', () => {
+            if (!SoundManager.initialized) SoundManager.init();
+            else if (SoundManager.ctx && SoundManager.ctx.state === 'suspended') SoundManager.ctx.resume();
+        });
 
         const Storage = {
             save: (data) => {
@@ -298,6 +467,19 @@
             ...j,
             state: j.state ? { ...j.state } : undefined
         });
+
+        const rarityGlowClass = (rarity) => {
+            if (rarity >= 5) return 'rarity-glow-5';
+            if (rarity >= 4) return 'rarity-glow-4';
+            if (rarity >= 3) return 'rarity-glow-3';
+            return '';
+        };
+
+        const jokerBadge = (j) => {
+            const b = j.state && j.state.b ? j.state.b : 0;
+            if (b <= 0) return '';
+            return `<div class="absolute -top-1.5 -right-1.5 bg-gold-600 text-stone-950 text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-stone-950 shadow-md">+${b}</div>`;
+        };
 
         const JOKERS_DB = [
             // Wildling
@@ -369,7 +551,16 @@
               eff: (ctx) => { ctx.finalMult *= 1.5; } }
         ];
 
-        const getTarget = (level) => Math.floor(400 * Math.pow(1.35, level - 1));
+        const BOSS_RELICS_DB = [
+            { id: 'br1', name: 'เหรียญตราผู้กล้า', icon: '🎖️', desc: 'รับโบนัส +15 Mult เสมอ (ติดตัว)', eff: (ctx) => { ctx.addMult += 15; } },
+            { id: 'br2', name: 'ดาบแห่งแสง', icon: '🗡️', desc: 'ไพ่ทุกใบที่ร่ายให้ +15 Chips เสมอ', eff: (ctx) => { ctx.addChips += (ctx.playedCards.length * 15); } },
+            { id: 'br3', name: 'โลหิตมังกร', icon: '🩸', desc: 'รับตัวคูณทวีคูณ (xMult) +0.5 เสมอ', eff: (ctx) => { ctx.xMult += 0.5; } },
+            { id: 'br4', name: 'ม้วนคัมภีร์ปราชญ์', icon: '📜', desc: 'สิทธิ์ร่ายเวทย์และทิ้งไพ่ +1 ครั้ง ในทุกด่าน', onStart: (r, st) => { st.playsLeft += 1; st.discardsLeft += 1; } },
+            { id: 'br5', name: 'ถ้วยทองคำศักดิ์สิทธิ์', icon: '🏆', desc: 'รับเงินโบนัส +5 🪙 เสมอเมื่อผ่านด่านใดๆ', onWin: (r, st) => { st.money += 5; } },
+            { id: 'br6', name: 'ตราประทับกษัตริย์', icon: '👑', desc: 'หากจัดชุดไพ่ตั้งแต่ 4 ใบขึ้นไป รับ x1.5 Mult', eff: (ctx) => { if(ctx.playedCards.length >= 4) ctx.xMult *= 1.5; } }
+        ];
+
+        const getTarget = (level) => Math.floor(320 * Math.pow(1.30, level - 1));
 
         const LEVELS_DB = Array.from({length: 20}, (_, i) => {
             const level = i + 1; const isBoss = level % 5 === 0;
@@ -390,15 +581,48 @@
         });
 
         const initialState = {
+            gameMode: 'story',
+            leaderboardTab: 'story',
+            playerName: 'นักผจญภัย',
+            scoreSubmitted: false,
             scene: 'start', level: 1, money: 4, hp: 0, targetScore: 0,
             playsLeft: 4, maxPlays: 4, discardsLeft: 3, maxDiscards: 3,
             deck: [], hand: [], selectedIndices: [], jokers: [], shopItems: [],
+            bossRelics: [], bossRewardCandidates: [],
             activeDebuff: null, isAnimating: false, tutorialStep: 0, tutorialSeen: false,
-            stats: { totalDmg: 0, highestLevel: 0, handsPlayed: 0 }
+            stats: { totalDmg: 0, highestLevel: 0, highestChallengeLevel: 0, handsPlayed: 0 }
         };
         let State = JSON.parse(JSON.stringify(initialState));
 
         const Logic = {
+            getLevelData: (level) => {
+                if (level <= 20) return LEVELS_DB[level - 1];
+                
+                const isBoss = level % 5 === 0;
+                const target = getTarget(level) * (isBoss ? 2 : 1);
+                const reward = 3 + Math.floor(level / 2);
+                
+                const prefixes = ["วิญญาณ", "เงาอมตะ", "จ้าวแห่ง", "ราชา", "บรรพกาล", "ผู้ร่วงหล่น", "มหันตภัย"];
+                const bases = ["อัศวิน", "มังกร", "ปีศาจ", "แม่มด", "โกเลม", "อสูรกาย", "จอมเวทย์"];
+                const icons = ["🧌", "🧞", "🧟‍♂️", "🦇", "🦂", "🕸️", "🌋", "👁️", "🐙"];
+                
+                let n = `${prefixes[Math.floor(Math.random()*prefixes.length)]}${bases[Math.floor(Math.random()*bases.length)]}`;
+                let ic = icons[Math.floor(Math.random()*icons.length)];
+                let rule = null;
+
+                if (isBoss) {
+                    n = "บอส: " + n;
+                    ic = "☠️";
+                    const ruleTypes = [
+                        { type: 'random_ban', desc: 'สุ่มแบน 1 สัญลักษณ์ตลอดด่าน' },
+                        { type: 'less_plays', desc: 'จำนวนเล่นไพ่ลดลงเหลือ 3 ครั้ง' },
+                        { type: 'final_boss', desc: 'เล่นได้ 3 ครั้ง + แบนไพ่ 1 ชนิด' }
+                    ];
+                    rule = ruleTypes[Math.floor(Math.random() * ruleTypes.length)];
+                }
+
+                return { level, enemyName: n, enemyIcon: ic, target, reward, isBoss, specialRule: rule };
+            },
             createDeck: () => {
                 let d = [];
                 for (const suit in SUITS) {
@@ -478,6 +702,17 @@
                     }
                 });
 
+                // Apply Boss Relics globally
+                State.bossRelics.forEach(r => {
+                    if (r.eff) {
+                        let bC = ctx.addChips, bM = ctx.addMult, bxM = ctx.xMult, fM = ctx.finalMult;
+                        r.eff(ctx, r, State);
+                        if(bC!==ctx.addChips || bM!==ctx.addMult || bxM!==ctx.xMult || fM!==ctx.finalMult) {
+                            ctx.pops.push({ name: r.name, icon: r.icon });
+                        }
+                    }
+                });
+
                 // Resolve order: (BaseC + AddC) * (BaseM + AddM) * xMult * finalMult
                 let totalC = Math.max(0, ctx.baseChips + ctx.addChips);
                 let totalM = Math.max(1, ctx.baseMult + ctx.addMult) * ctx.xMult * ctx.finalMult;
@@ -489,13 +724,14 @@
 
         const Controller = {
             startLevel: () => {
-                const lvl = LEVELS_DB[State.level-1];
+                const lvl = Logic.getLevelData(State.level);
                 State.hp = lvl.target; State.targetScore = lvl.target;
                 State.playsLeft = State.maxPlays; State.discardsLeft = State.maxDiscards;
                 State.deck = Logic.createDeck(); State.hand = []; State.selectedIndices = [];
                 State.activeDebuff = null;
 
                 State.jokers.forEach(j => { if(j.onStart) j.onStart(j, State); });
+                State.bossRelics.forEach(r => { if(r.onStart) r.onStart(r, State); });
 
                 const hasShield = State.jokers.some(j => j.isShield);
                 if (lvl.specialRule) {
@@ -513,7 +749,7 @@
                 Logic.draw(8);
                 State.scene = 'battle';
                 
-                // Tutorial
+                // Tutorial trigger
                 if (State.level === 1 && !State.tutorialSeen) State.tutorialStep = 1;
                 Render();
             },
@@ -541,12 +777,9 @@
                 const res = Logic.calcScore(sel);
                 
                 await Utils.sleep(300);
-                // Sequence animations
                 Controller.spawnText(`[${res.ctx.handName}]`, 'text-blue-300 text-3xl text-shadow-gold', 0, -30);
                 await Utils.sleep(400);
 
-                let curC = res.ctx.baseChips, curM = res.ctx.baseMult;
-                
                 for(let c of sel) {
                     let v = (State.activeDebuff && State.activeDebuff.suit===c.suit) ? 0 : c.val;
                     if(v>0) { Controller.spawnText(`+${v} Chips`, 'text-gray-300', Math.random()*40-20, Math.random()*20); }
@@ -561,7 +794,14 @@
                     await Utils.sleep(300);
                 }
 
+                // Hit Flash & Screen Shake
                 SoundManager.play('hit');
+                const enemyEl = document.getElementById('enemy-avatar');
+                if (enemyEl) {
+                    enemyEl.classList.remove('enemy-hit');
+                    void enemyEl.offsetWidth; // trigger reflow
+                    enemyEl.classList.add('enemy-hit');
+                }
                 document.getElementById('app').classList.add('shake');
                 setTimeout(()=>document.getElementById('app').classList.remove('shake'), 400);
                 Controller.spawnText(`🔥 ${Utils.formatNum(res.total)} Dmg!`, 'text-red-500 text-5xl text-shadow-red', 0, 0);
@@ -582,7 +822,6 @@
                 
                 State.isAnimating = false;
                 Render();
-                if(State.scene === 'gameover') SoundManager.play('play'); // loss sound variant
             },
             discard: async () => {
                 if (State.isAnimating || State.discardsLeft <= 0) return;
@@ -602,14 +841,46 @@
                 SoundManager.play('win');
                 State.jokers.forEach(j => { if(j.onWin) j.onWin(j, State); });
                 State.jokers.forEach(j => { if(j.onEnd) j.onEnd(j, State); });
+                State.bossRelics.forEach(r => { if(r.onWin) r.onWin(r, State); });
+                State.bossRelics.forEach(r => { if(r.onEnd) r.onEnd(r, State); });
                 
-                let r = LEVELS_DB[State.level-1].reward;
-                State.money += r; State.stats.highestLevel = Math.max(State.stats.highestLevel, State.level);
+                let r = Logic.getLevelData(State.level).reward;
+                State.money += r; 
                 
-                if (State.level === 20) State.scene = 'victory';
-                else {
+                if (State.gameMode === 'story') {
+                    State.stats.highestLevel = Math.max(State.stats.highestLevel, State.level);
+                } else {
+                    State.stats.highestChallengeLevel = Math.max(State.stats.highestChallengeLevel || 0, State.level);
+                }
+                
+                if (State.gameMode === 'story' && State.level === 20) {
+                    State.scene = 'victory';
+                    Utils.spawnConfetti();
+                } else if (State.level % 5 === 0) { // แจกของวิเศษหลังจบบอส
+                    Controller.genBossReward();
+                    State.scene = 'boss_reward';
+                    Storage.save({ tutorialSeen: State.tutorialSeen, stats: State.stats });
+                } else {
                     State.level++; Controller.genShop(); State.scene = 'shop';
                     Storage.save({ tutorialSeen: State.tutorialSeen, stats: State.stats });
+                }
+            },
+            genBossReward: () => {
+                State.bossRewardCandidates = [];
+                const pool = BOSS_RELICS_DB.filter(r => !State.bossRelics.some(br => br.id === r.id));
+                const shuffled = Utils.shuffle([...pool]);
+                State.bossRewardCandidates = shuffled.slice(0, 3);
+            },
+            claimBossReward: (idx) => {
+                const relic = State.bossRewardCandidates[idx];
+                if (relic) {
+                    State.bossRelics.push(relic);
+                    SoundManager.play('joker');
+                    Utils.showToast(`ได้รับวิญญาณบอส: ${relic.name}!`, "success");
+                    State.level++;
+                    Controller.genShop();
+                    State.scene = 'shop';
+                    Render();
                 }
             },
             genShop: () => {
@@ -640,8 +911,28 @@
                 if(State.money < 2) { Utils.showToast("เงินไม่พอ (ใช้ 2 🪙)"); return; }
                 State.money -= 2; Controller.genShop(); SoundManager.play('select'); Render();
             },
+            submitOnlineScore: async () => {
+                if (State.scoreSubmitted) return;
+                const input = document.getElementById('player-name-input');
+                if (input && input.value.trim()) {
+                    State.playerName = input.value.trim();
+                    try { localStorage.setItem('spiritjoke_player_name', State.playerName); } catch(e){}
+                }
+                
+                Utils.showToast("กำลังส่งสถิติ...", "success");
+                const ok = await window.Leaderboard.submitScore(State.playerName, State.gameMode, State.level, State.stats.totalDmg);
+                if (ok) {
+                    State.scoreSubmitted = true;
+                    SoundManager.play('coin');
+                    Utils.showToast("บันทึกสถิติออนไลน์สำเร็จ!", "success");
+                    Render();
+                } else {
+                    Utils.showToast("เกิดข้อผิดพลาดในการบันทึก", "error");
+                }
+            },
             spawnText: (txt, cls, xOff=0, yOff=0) => {
                 const c = document.getElementById('damage-container');
+                if(!c) return;
                 const el = document.createElement('div');
                 el.className = `damage-popup font-medieval ${cls}`;
                 el.innerText = txt;
@@ -663,18 +954,81 @@
             if (State.scene === 'start') {
                 h = `<div class="flex flex-col items-center justify-center h-full text-center p-4">
                         <h1 class="font-medieval text-5xl md:text-7xl text-gold-400 mb-2 text-shadow-gold tracking-wider">SpiritJoke</h1>
-                        <h2 class="font-body text-xl md:text-2xl text-parchment-dark mb-10 tracking-widest">Medieval Deckbuilder</h2>
-                        <button onclick="SoundManager.init(); State.scene='map'; Render();" class="px-10 py-3 bg-stone-850 border-2 border-gold-600 rounded text-gold-400 font-medieval text-2xl hover:bg-stone-900 transition shadow-glow-gold hover:-translate-y-1 transform">
-                            เริ่มผจญภัย
+                        <h2 class="font-body text-xl md:text-2xl text-parchment-dark mb-8 tracking-widest">Medieval Deckbuilder</h2>
+                        <div class="flex flex-col md:flex-row gap-4 mb-6">
+                            <button onclick="SoundManager.init(); State.gameMode='story'; State.scene='map'; Render();" class="px-8 py-3 bg-stone-850 border-2 border-gold-600 rounded text-gold-400 font-medieval text-xl md:text-2xl hover:bg-stone-900 transition shadow-glow-gold hover:-translate-y-1 transform">
+                                📖 โหมดเนื้อเรื่อง (20 ด่าน)
+                            </button>
+                            <button onclick="SoundManager.init(); State.gameMode='challenge'; State.scene='map'; Render();" class="px-8 py-3 bg-red-950 border-2 border-red-500 rounded text-red-200 font-medieval text-xl md:text-2xl hover:bg-red-900 transition shadow-glow-red hover:-translate-y-1 transform">
+                                ⚔️ โหมดท้าทาย (ไร้ขีดจำกัด)
+                            </button>
+                        </div>
+                        <button onclick="SoundManager.init(); State.scene='leaderboard'; Render();" class="px-8 py-2.5 bg-stone-900 border border-yellow-500/80 rounded-lg text-yellow-300 font-medieval text-lg hover:bg-stone-850 transition shadow-card flex items-center gap-2">
+                            🏆 ตารางอันดับออนไลน์ (Leaderboard)
                         </button>
+                        ${State.stats.highestChallengeLevel ? `<p class="mt-6 text-stone-400 font-bold bg-stone-900 px-4 py-2 rounded border border-stone-800">🏆 สถิติสูงสุดของคุณ: ด่าน ${State.stats.highestChallengeLevel}</p>` : ''}
                     </div>`;
-            } 
+            }
+            else if (State.scene === 'leaderboard') {
+                const filtered = window.Leaderboard.scores
+                    .filter(s => s.gameMode === State.leaderboardTab)
+                    .sort((a,b) => (b.level || 0) - (a.level || 0) || (b.totalDmg || 0) - (a.totalDmg || 0));
+
+                h = `<div class="flex flex-col items-center h-full p-4 md:p-6 bg-stone-950 overflow-y-auto max-w-4xl mx-auto w-full">
+                        <div class="flex justify-between items-center w-full mb-6 border-b border-stone-800 pb-4">
+                            <h2 class="font-medieval text-3xl md:text-4xl text-gold-400 text-shadow-gold flex items-center gap-2">
+                                🏆 ตารางอันดับออนไลน์
+                            </h2>
+                            <button onclick="State.scene='start'; SoundManager.play('select'); Render();" class="px-4 py-2 bg-stone-900 border border-stone-700 text-parchment rounded hover:bg-stone-800 transition font-bold text-sm">
+                                ✖ กลับเมนูหลัก
+                            </button>
+                        </div>
+
+                        <!-- Mode Switch Tabs -->
+                        <div class="flex gap-2 mb-6">
+                            <button onclick="State.leaderboardTab='story'; SoundManager.play('select'); Render();" class="px-6 py-2 rounded-lg font-medieval text-base border transition ${State.leaderboardTab==='story'?'bg-gold-600 text-stone-950 font-bold border-gold-400 shadow-glow-gold':'bg-stone-900 text-stone-400 border-stone-700'}">
+                                📖 โหมดเนื้อเรื่อง
+                            </button>
+                            <button onclick="State.leaderboardTab='challenge'; SoundManager.play('select'); Render();" class="px-6 py-2 rounded-lg font-medieval text-base border transition ${State.leaderboardTab==='challenge'?'bg-red-800 text-white font-bold border-red-500 shadow-glow-red':'bg-stone-900 text-stone-400 border-stone-700'}">
+                                ⚔️ โหมดท้าทาย
+                            </button>
+                        </div>
+
+                        <!-- Leaderboard Table -->
+                        <div class="w-full bg-stone-900/90 border border-stone-800 rounded-xl overflow-hidden shadow-card">
+                            <div class="grid grid-cols-12 bg-stone-950 text-gold-400 font-medieval p-3 border-b border-stone-800 text-sm md:text-base text-center font-bold">
+                                <div class="col-span-2">อันดับ</div>
+                                <div class="col-span-5 text-left pl-2">ชื่อผู้กล้า</div>
+                                <div class="col-span-2">ด่านสูงสุด</div>
+                                <div class="col-span-3">ความเสียหายรวม</div>
+                            </div>
+                            
+                            <div class="divide-y divide-stone-800/60 max-h-[50vh] overflow-y-auto">
+                                ${filtered.length > 0 ? filtered.map((item, index) => {
+                                    const rankBadge = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index+1}`;
+                                    const isSelf = window.Leaderboard.user && item.uid === window.Leaderboard.user.uid;
+                                    return `
+                                    <div class="grid grid-cols-12 p-3 text-center items-center text-sm md:text-base ${isSelf ? 'bg-amber-950/40 border-l-4 border-gold-500 font-bold' : 'hover:bg-stone-850/50'} transition">
+                                        <div class="col-span-2 font-medieval ${index < 3 ? 'text-2xl' : 'text-stone-400'}">${rankBadge}</div>
+                                        <div class="col-span-5 text-left pl-2 font-bold text-parchment truncate flex items-center gap-1">
+                                            ${item.playerName || 'ผู้กล้าไร้นาม'}
+                                            ${isSelf ? '<span class="text-[10px] bg-gold-600 text-stone-950 px-1.5 py-0.5 rounded font-bold ml-1">คุณ</span>' : ''}
+                                        </div>
+                                        <div class="col-span-2 font-medieval text-gold-400 font-bold">ด่าน ${item.level || 1}</div>
+                                        <div class="col-span-3 text-red-400 font-bold">${Utils.formatNum(item.totalDmg || 0)}</div>
+                                    </div>`;
+                                }).join('') : `<div class="p-8 text-center text-stone-500 font-medieval">ยังไม่มีสถิติในหมวดนี้ เป็นคนแรกที่พิชิตด่านสิ!</div>`}
+                            </div>
+                        </div>
+                    </div>`;
+            }
             else if (State.scene === 'map') {
-                const lvl = LEVELS_DB[State.level-1];
+                const lvl = Logic.getLevelData(State.level);
+                const levelDisplay = State.gameMode === 'story' ? `ด่านที่ ${State.level} / 20` : `ด่านที่ ${State.level} (ท้าทาย)`;
                 h = `<div class="flex flex-col items-center h-full p-6 overflow-y-auto">
-                        <h2 class="font-medieval text-4xl text-gold-400 mb-6 text-shadow-gold">เส้นทางสู่บัลลังก์</h2>
+                        <h2 class="font-medieval text-4xl text-gold-400 mb-6 text-shadow-gold">${State.gameMode === 'story' ? 'เส้นทางสู่บัลลังก์' : 'หอคอยไร้ขีดจำกัด'}</h2>
                         <div class="w-full max-w-md bg-stone-900/90 border border-gold-800 rounded-lg p-6 flex flex-col items-center justify-center gap-4 relative shadow-card">
-                            <div class="text-parchment-dark text-xl font-bold border-b border-stone-700 pb-2 w-full text-center">ด่านที่ ${State.level} / 20</div>
+                            <div class="text-parchment-dark text-xl font-bold border-b border-stone-700 pb-2 w-full text-center">${levelDisplay}</div>
                             <div class="text-7xl animate-float mt-4 mb-2 drop-shadow-xl">${lvl.enemyIcon}</div>
                             <h3 class="font-medieval text-3xl text-red-400 text-shadow text-center">${lvl.enemyName}</h3>
                             ${lvl.isBoss ? `<div class="text-yellow-500 font-bold px-6 py-1 bg-red-900/40 rounded border border-red-700 animate-pulse mt-2">⚔️ บอสประจำถิ่น ⚔️</div>` : ''}
@@ -689,7 +1043,7 @@
                     </div>`;
             }
             else if (State.scene === 'battle') {
-                const lvl = LEVELS_DB[State.level-1];
+                const lvl = Logic.getLevelData(State.level);
                 const hpPct = Math.max(0, (State.hp / State.targetScore) * 100);
                 
                 let preview = "";
@@ -705,7 +1059,8 @@
                     <div class="w-full flex justify-between items-start p-2 md:p-4 bg-stone-950/90 border-b border-stone-800 z-10 shadow-md">
                         <div class="flex gap-2 min-h-[4rem]">
                             ${State.jokers.map(j => `
-                                <div class="w-12 h-16 md:w-16 md:h-20 rounded joker-card tooltip flex flex-col items-center justify-center text-2xl md:text-3xl ${FACTIONS[j.faction].color} ${FACTIONS[j.faction].bg} shadow-sm">
+                                <div class="w-12 h-16 md:w-16 md:h-20 rounded joker-card tooltip flex flex-col items-center justify-center text-2xl md:text-3xl ${FACTIONS[j.faction].color} ${FACTIONS[j.faction].bg} ${rarityGlowClass(j.rarity)} shadow-sm">
+                                    ${jokerBadge(j)}
                                     ${j.icon}
                                     <div class="tooltip-text absolute w-48 bg-stone-900 border border-gold-600 text-sm p-3 rounded text-parchment z-50 shadow-2xl">
                                         <div class="font-bold text-gold-400 text-base mb-1">${j.name}</div>
@@ -716,15 +1071,28 @@
                             ${[...Array(5 - State.jokers.length)].map(() => `<div class="w-12 h-16 md:w-16 md:h-20 rounded border-2 border-dashed border-stone-700 bg-stone-900/30"></div>`).join('')}
                         </div>
                         <div class="text-right text-sm md:text-base bg-stone-900/80 p-2 rounded border border-stone-800 shadow-inner">
-                            <div class="text-stone-300 font-bold mb-1">ด่าน ${State.level}/20</div>
-                            <div class="text-yellow-400 font-bold flex items-center justify-end gap-1">🪙 ${State.money}</div>
+                            <div class="text-stone-300 font-bold mb-1">${State.gameMode === 'story' ? `ด่าน ${State.level}/20` : `ด่าน ${State.level} (ท้าทาย)`}</div>
+                            <div class="text-yellow-400 font-bold flex items-center justify-end gap-1 mb-1">🪙 ${State.money}</div>
+                            ${State.bossRelics.length > 0 ? `
+                                <div class="flex gap-1 justify-end flex-wrap max-w-[120px]">
+                                    ${State.bossRelics.map(r => `
+                                        <div class="w-6 h-6 md:w-7 md:h-7 bg-stone-950 border border-gold-600 rounded-full flex items-center justify-center text-xs tooltip relative shadow-glow-gold z-30">
+                                            ${r.icon}
+                                            <div class="tooltip-text absolute right-0 top-full mt-2 w-48 bg-stone-900 border border-gold-600 text-xs p-2 rounded text-parchment text-left shadow-2xl">
+                                                <div class="font-bold text-gold-400 mb-1">${r.name}</div>
+                                                <div class="text-stone-300 leading-tight">${r.desc}</div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
                         </div>
                     </div>
 
                     <div class="flex-1 flex flex-col items-center justify-center p-4 relative z-0">
                         ${State.activeDebuff ? `<div class="absolute top-4 bg-red-950/90 border border-red-500 text-red-200 px-6 py-2 rounded-full text-sm font-bold shadow-glow-red z-10">⚠️ ${State.activeDebuff.desc}</div>` : ''}
                         
-                        <div class="text-8xl md:text-9xl mb-6 animate-float text-shadow-gold drop-shadow-2xl filter saturate-150">${lvl.enemyIcon}</div>
+                        <div id="enemy-avatar" class="text-8xl md:text-9xl mb-6 animate-float text-shadow-gold drop-shadow-2xl filter saturate-150 transition-transform">${lvl.enemyIcon}</div>
                         
                         <div class="w-full max-w-md bg-stone-950 border-2 border-stone-700 h-8 rounded-full overflow-hidden relative shadow-card">
                             <div class="absolute top-0 left-0 h-full bg-gradient-to-r from-red-800 to-red-500 transition-all duration-500 ease-out" style="width: ${hpPct}%"></div>
@@ -802,7 +1170,7 @@
                         <!-- Shop Cards Grid -->
                         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6">
                             ${State.shopItems.map((it, i) => `
-                                <div class="bg-stone-900 border-2 ${FACTIONS[it.faction].color} rounded-xl p-4 flex flex-col justify-between items-center text-center shadow-card relative hover:border-gold-400 transition-all">
+                                <div class="bg-stone-900 border-2 ${FACTIONS[it.faction].color} rounded-xl p-4 flex flex-col justify-between items-center text-center shadow-card relative hover:border-gold-400 transition-all ${rarityGlowClass(it.rarity)}">
                                     <div class="text-4xl md:text-5xl my-2 drop-shadow-md">${it.icon}</div>
                                     <div class="font-bold text-gold-400 text-base md:text-lg mb-1">${it.name}</div>
                                     <div class="text-xs text-stone-400 mb-2 bg-stone-950 px-2 py-0.5 rounded-full border border-stone-800 inline-block">${FACTIONS[it.faction].name}</div>
@@ -829,7 +1197,8 @@
                             <div class="text-sm text-stone-300 mb-3 text-center font-bold">วิญญาณโจ๊กเกอร์ที่คุณถืออยู่ (${State.jokers.length}/5) - คลิกที่ใบใดก็ได้เพื่อขายคืน 50%</div>
                             <div class="flex flex-wrap gap-3 justify-center">
                                 ${State.jokers.map((j, i) => `
-                                    <div onclick="Controller.sell(${i})" class="w-20 md:w-24 bg-stone-950 border-2 ${FACTIONS[j.faction].color} rounded-lg p-2 flex flex-col items-center justify-between cursor-pointer hover:border-red-500 transition-all tooltip relative shadow-md group">
+                                    <div onclick="Controller.sell(${i})" class="w-20 md:w-24 bg-stone-950 border-2 ${FACTIONS[j.faction].color} rounded-lg p-2 flex flex-col items-center justify-between cursor-pointer hover:border-red-500 transition-all tooltip relative shadow-md group ${rarityGlowClass(j.rarity)}">
+                                        ${jokerBadge(j)}
                                         <div class="text-2xl md:text-3xl">${j.icon}</div>
                                         <div class="text-[10px] md:text-xs text-gold-400 font-bold truncate w-full text-center mt-1">${j.name}</div>
                                         <div class="text-[10px] text-red-400 font-bold mt-1 group-hover:text-red-300">ขาย +${Math.floor(j.cost/2)}🪙</div>
@@ -843,27 +1212,59 @@
                         </div>
                     </div>`;
             }
+            else if (State.scene === 'boss_reward') {
+                h = `<div class="flex flex-col items-center justify-center h-full p-4 md:p-6 bg-stone-950 overflow-y-auto max-w-4xl mx-auto w-full relative">
+                        <div class="absolute inset-0 bg-red-900/10 pointer-events-none animate-pulse"></div>
+                        <h2 class="font-medieval text-4xl md:text-5xl text-gold-400 text-shadow-gold mb-2 z-10">วิญญาณแห่งบอส!</h2>
+                        <p class="text-sm md:text-lg text-stone-300 mb-10 z-10 text-center">ท่านพิชิตภัยคุกคามสำเร็จ... จงเลือกรับ 1 พรวิเศษ เพื่อช่วยเหลือท่านในด่านถัดไป</p>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-3xl z-10">
+                            ${State.bossRewardCandidates.map((r, i) => `
+                                <div onclick="Controller.claimBossReward(${i})" class="cursor-pointer bg-gradient-to-b from-stone-800 to-stone-950 border-2 border-gold-500 rounded-xl p-6 flex flex-col items-center text-center shadow-glow-gold hover:-translate-y-2 hover:shadow-[0_0_30px_rgba(255,215,0,0.8)] transition-all transform duration-300">
+                                    <div class="text-6xl my-4 drop-shadow-2xl animate-float">${r.icon}</div>
+                                    <div class="font-bold text-gold-400 text-xl md:text-2xl mb-2 text-shadow-gold">${r.name}</div>
+                                    <div class="text-sm text-parchment leading-relaxed bg-stone-950/60 p-3 rounded w-full border border-stone-700/50 h-full flex items-center justify-center">${r.desc}</div>
+                                    <div class="mt-4 text-xs font-bold text-green-400 bg-green-900/30 px-3 py-1 rounded-full border border-green-700/50 animate-pulse">คลิกเพื่อรับพรนี้</div>
+                                </div>`).join('')}
+                        </div>
+                    </div>`;
+            }
             else if (State.scene === 'gameover' || State.scene === 'victory') {
                 const isW = State.scene === 'victory';
-                h = `<div class="flex flex-col items-center justify-center h-full text-center p-6 bg-stone-950/95 relative overflow-hidden">
-                        ${isW ? '<div class="absolute inset-0 z-0 bg-[url(\'data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%2250%22 font-size=%2250%22 opacity=%220.05%22>👑</text></svg>\')] bg-repeat opacity-20"></div>' : ''}
-                        
-                        <h1 class="font-medieval text-5xl md:text-7xl mb-8 z-10 ${isW ? 'text-gold-400 text-shadow-gold' : 'text-red-600 text-shadow-red'}">
+                h = `<div class="flex flex-col items-center justify-center h-full text-center p-6 bg-stone-950/95 relative overflow-y-auto">
+                        <h1 class="font-medieval text-5xl md:text-7xl mb-6 z-10 ${isW ? 'text-gold-400 text-shadow-gold animate-bounce' : 'text-red-600 text-shadow-red'}">
                             ${isW ? '👑 ผู้กล้าผู้พิชิตบัลลังก์!' : '💀 ท่านได้พ่ายแพ้...'}
                         </h1>
                         
-                        <div class="bg-stone-900 border ${isW ? 'border-gold-600' : 'border-red-800'} p-8 rounded-xl mb-10 max-w-md w-full shadow-card z-10">
-                            <h3 class="text-2xl text-parchment-dark mb-6 border-b border-stone-700 pb-3 font-medieval">สถิติการผจญภัย</h3>
-                            <div class="space-y-4 text-left text-lg font-body">
-                                <p class="flex justify-between"><span>ไปถึงด่าน:</span> <span class="${isW?'text-gold-400':'text-red-400'} font-bold">${State.level} / 20</span></p>
+                        <div class="bg-stone-900 border ${isW ? 'border-gold-600' : 'border-red-800'} p-6 md:p-8 rounded-xl mb-6 max-w-md w-full shadow-card z-10">
+                            <h3 class="text-2xl text-parchment-dark mb-4 border-b border-stone-700 pb-2 font-medieval">สถิติการผจญภัย</h3>
+                            <div class="space-y-3 text-left text-base md:text-lg font-body mb-6">
+                                <p class="flex justify-between"><span>โหมด:</span> <span class="text-stone-300 font-bold">${State.gameMode === 'story' ? 'เนื้อเรื่อง' : 'ท้าทาย (ไร้ขีดจำกัด)'}</span></p>
+                                <p class="flex justify-between"><span>ไปถึงด่าน:</span> <span class="${isW?'text-gold-400':'text-red-400'} font-bold">${State.level}${State.gameMode === 'story' ? ' / 20' : ''}</span></p>
                                 <p class="flex justify-between"><span>ความเสียหายรวม:</span> <span class="text-red-400 font-bold">${Utils.formatNum(State.stats.totalDmg)}</span></p>
                                 <p class="flex justify-between"><span>เล่นไพ่ไปทั้งหมด:</span> <span class="text-blue-300 font-bold">${State.stats.handsPlayed} ครั้ง</span></p>
                             </div>
+
+                            <!-- Online Leaderboard Submission Box -->
+                            <div class="bg-stone-950 p-4 rounded-lg border border-stone-800 flex flex-col gap-3">
+                                <label class="text-xs text-gold-400 font-bold text-left">🏆 บันทึกสถิติขึ้นตารางอันดับออนไลน์:</label>
+                                <div class="flex gap-2">
+                                    <input id="player-name-input" type="text" maxlength="15" value="${State.playerName}" placeholder="ใส่ชื่อของคุณ..." class="bg-stone-900 border border-stone-700 px-3 py-2 rounded text-parchment text-sm flex-1 focus:outline-none focus:border-gold-500 font-bold" ${State.scoreSubmitted ? 'disabled' : ''}>
+                                    <button onclick="Controller.submitOnlineScore()" class="px-4 py-2 bg-gradient-to-r from-gold-600 to-gold-800 text-stone-950 font-bold rounded text-sm hover:from-gold-500 hover:to-gold-700 transition shadow-md whitespace-nowrap ${State.scoreSubmitted ? 'opacity-50 cursor-not-allowed' : ''}" ${State.scoreSubmitted ? 'disabled' : ''}>
+                                        ${State.scoreSubmitted ? '✓ บันทึกแล้ว' : 'ส่งสถิติ'}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
-                        <button onclick="State = JSON.parse(JSON.stringify(initialState)); const s = Storage.load(); if(s) { State.tutorialSeen = s.tutorialSeen; State.stats = s.stats; } State.scene='start'; SoundManager.play('select'); Render();" class="px-10 py-4 bg-stone-850 border-2 ${isW?'border-gold-400 text-gold-400 shadow-glow-gold':'border-red-500 text-red-400 shadow-glow-red'} rounded-lg font-medieval text-2xl hover:bg-stone-900 transition z-10 transform hover:scale-105">
-                            ผจญภัยใหม่อีกครั้ง
-                        </button>
+                        <div class="flex flex-wrap gap-4 justify-center z-10">
+                            <button onclick="State.scene='leaderboard'; SoundManager.play('select'); Render();" class="px-6 py-3 bg-stone-900 border border-yellow-500 text-yellow-300 rounded-lg font-medieval text-lg hover:bg-stone-850 transition shadow-card">
+                                🏆 ดูตารางอันดับ
+                            </button>
+                            <button onclick="const c = document.getElementById('confetti-layer'); if(c) c.innerHTML=''; State = JSON.parse(JSON.stringify(initialState)); const s = Storage.load(); if(s) { State.tutorialSeen = s.tutorialSeen; State.stats = s.stats; State.playerName = s.playerName || 'นักผจญภัย'; } State.scene='start'; SoundManager.play('select'); Render();" class="px-8 py-3 bg-stone-850 border-2 ${isW?'border-gold-400 text-gold-400 shadow-glow-gold':'border-red-500 text-red-400 shadow-glow-red'} rounded-lg font-medieval text-xl hover:bg-stone-900 transition transform hover:scale-105">
+                                กลับสู่เมนูหลัก
+                            </button>
+                        </div>
                     </div>`;
             }
 
@@ -875,9 +1276,14 @@
             if (saved) {
                 State.tutorialSeen = saved.tutorialSeen || false;
                 State.stats = saved.stats || initialState.stats;
+                if (saved.playerName) State.playerName = saved.playerName;
+                if (State.stats.highestChallengeLevel === undefined) State.stats.highestChallengeLevel = 0;
             }
+            try {
+                const pName = localStorage.getItem('spiritjoke_player_name');
+                if (pName) State.playerName = pName;
+            } catch(e){}
             Render();
-            SoundManager.init(); // Attempt init, though browser policy requires user interaction first
         };
     </script>
 </body>
